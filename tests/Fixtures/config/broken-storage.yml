@@ -1,0 +1,12 @@
+# FileStorage pointed at a path that cannot be created, so create() throws.
+global:
+  behind_proxy: false
+storage:
+  type: Kanopi\Firewall\Storage\FileStorage
+  config:
+    storage_file: /dev/null/kanopi-firewall-cannot-write/blocked.data
+    offense_file: /dev/null/kanopi-firewall-cannot-write/offenses.data
+logger:
+  handlers:
+    - class: Monolog\Handler\NullHandler
+plugins: []

@@ -1,0 +1,23 @@
+# One path is gated behind a math challenge.
+global:
+  behind_proxy: false
+storage:
+  type: Kanopi\Firewall\Storage\InMemoryStorage
+logger:
+  handlers:
+    - class: Monolog\Handler\NullHandler
+challenge:
+  provider: math
+  secret: 'test-secret-not-for-production-use'
+  path: /_firewall/challenge
+  cookie_name: fw_challenge_pass
+  header_name: X-Firewall-Challenge
+plugins:
+  - plugin: "Kanopi\\Firewall\\Plugins\\Url"
+    response: challenge
+    enable: true
+    metadata:
+      name: test-challenge-url
+      default_expiration_time: 120
+    config:
+      - path:/gated

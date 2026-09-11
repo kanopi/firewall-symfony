@@ -1,0 +1,17 @@
+parameters:
+    level: max
+    paths:
+        - src
+        - tests
+    tips:
+        treatPhpDocTypesAsCertain: false
+    excludePaths:
+        analyse:
+            # A DI configurator closure in the Symfony configurator
+            # namespace: every call in it is a global function PHPStan
+            # resolves against that namespace rather than the DSL.
+            - src/Resources/config/services.php
+            # A front controller for `php -S`, run as a subprocess by
+            # Integration\WebSapiObserveModeTest. Superglobals and a
+            # hand-rolled bootstrap, and not part of the package.
+            - tests/Fixtures/server/index.php

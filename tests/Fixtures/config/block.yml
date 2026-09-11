@@ -1,0 +1,18 @@
+# A firewall that refuses one address, with nothing durable behind it.
+global:
+  banning_message: 'Blocked: {{request.ip}}'
+  behind_proxy: false
+storage:
+  type: Kanopi\Firewall\Storage\InMemoryStorage
+logger:
+  handlers:
+    - class: Monolog\Handler\NullHandler
+plugins:
+  - plugin: "Kanopi\\Firewall\\Plugins\\IpAddress"
+    response: block
+    enable: true
+    metadata:
+      name: test-block-ip
+      status_code: 403
+    config:
+      - 203.0.113.5

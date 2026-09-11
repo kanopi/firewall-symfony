@@ -1,0 +1,17 @@
+# The one wiring the bundle refuses: a rule naming its own provider.
+global:
+  behind_proxy: false
+storage:
+  type: Kanopi\Firewall\Storage\InMemoryStorage
+challenge:
+  provider: math
+  secret: 'test-secret-not-for-production-use'
+plugins:
+  - plugin: "Kanopi\\Firewall\\Plugins\\Url"
+    response: challenge
+    enable: true
+    metadata:
+      name: gated-by-recaptcha
+      challenge_provider: recaptcha
+    config:
+      - path:/gated

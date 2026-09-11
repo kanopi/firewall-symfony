@@ -1,0 +1,9 @@
+# Nothing configured: every request reaches the application.
+global:
+  behind_proxy: false
+storage:
+  type: Kanopi\Firewall\Storage\InMemoryStorage
+logger:
+  handlers:
+    - class: Monolog\Handler\NullHandler
+plugins: []

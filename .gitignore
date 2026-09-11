@@ -1,0 +1,29 @@
+/vendor/
+/reports/
+/.phpunit.cache/
+/.phpunit.result.cache
+composer.lock
+
+# symfony/flex applies a Symfony *application* skeleton into whatever
+# directory it runs in, and `--no-scripts` does not stop it. It is
+# deliberately not in require-dev for that reason; CI installs it per job to
+# pin every symfony/* package onto one release line, then deletes the
+# skeleton before anything reads the tree. These entries are the safety net
+# for a stray local run — including the recipe that appends `/phpunit.xml`
+# to this file, which would otherwise quietly stop this package's own
+# PHPUnit configuration from ever being committed.
+/symfony.lock
+/.env
+/.env.*
+/.editorconfig
+/bin/console
+/bin/phpunit
+/config/
+/public/
+/phpunit.dist.xml
+/src/Kernel.php
+/src/Controller/
+/tests/bootstrap.php
+/var/
+/AGENTS.md
+/CLAUDE.md

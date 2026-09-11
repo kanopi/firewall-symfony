@@ -1,0 +1,110 @@
+{
+    "name": "kanopi/firewall-symfony",
+    "description": "Symfony bundle for kanopi/firewall \u2014 evaluates every request in a kernel.request listener and turns the verdict into a Response.",
+    "type": "symfony-bundle",
+    "keywords": [
+        "symfony",
+        "bundle",
+        "firewall",
+        "waf",
+        "security",
+        "rate-limiting"
+    ],
+    "homepage": "https://github.com/kanopi/firewall-symfony",
+    "authors": [
+        {
+            "name": "Sean Dietrich",
+            "email": "sean@kanopi.com"
+        },
+        {
+            "name": "Kanopi Studios Engineers",
+            "homepage": "https://kanopi.com/about-us/"
+        }
+    ],
+    "license": "MIT",
+    "autoload": {
+        "psr-4": {
+            "Kanopi\\FirewallBundle\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Kanopi\\FirewallBundle\\Tests\\": "tests/"
+        }
+    },
+    "require": {
+        "kanopi/firewall": "^2.24",
+        "monolog/monolog": "^3.9",
+        "php": ">=8.1",
+        "psr/log": "^3.0",
+        "symfony/config": "~6.4 || ~7.3 || ~8.1",
+        "symfony/console": "~6.4 || ~7.3 || ~8.1",
+        "symfony/dependency-injection": "~6.4 || ~7.3 || ~8.1",
+        "symfony/event-dispatcher": "~6.4 || ~7.3 || ~8.1",
+        "symfony/http-foundation": "~6.4 || ~7.3 || ~8.1",
+        "symfony/http-kernel": "~6.4 || ~7.3 || ~8.1",
+        "symfony/process": "~6.4 || ~7.3 || ~8.1",
+        "symfony/yaml": "~6.4 || ~7.3 || ~8.1"
+    },
+    "require-dev": {
+        "dealerdirect/phpcodesniffer-composer-installer": "^1.0",
+        "phpcompatibility/php-compatibility": "^9.3",
+        "phpstan/phpstan": "^2.1 <2.2.6",
+        "phpstan/phpstan-symfony": "^2.0",
+        "phpunit/phpunit": "^10.5 || ^11.5",
+        "squizlabs/php_codesniffer": "^3.13",
+        "symfony/framework-bundle": "~6.4 || ~7.3 || ~8.1",
+        "symfony/monolog-bundle": "^3.10 || ^4.0",
+        "symfony/var-dumper": "~6.4 || ~7.3 || ~8.1",
+        "twig/twig": "^3.0"
+    },
+    "suggest": {
+        "symfony/monolog-bundle": "Routes the library's PSR-3 audit trail into your application's Monolog channels and the profiler's log panel.",
+        "symfony/web-profiler-bundle": "Adds the firewall panel: which rule matched, in what mode, and which rules or backends are unhealthy."
+    },
+    "scripts": {
+        "check:code": "vendor/bin/phpcs --standard=phpcs_ruleset.xml src tests bin",
+        "fix:code": "vendor/bin/phpcbf --standard=phpcs_ruleset.xml src tests bin",
+        "check:security": "vendor/bin/phpstan analyse --memory-limit=-1",
+        "phpunit": "@phpunit:coverage",
+        "phpunit:coverage": "XDEBUG_MODE=coverage vendor/bin/phpunit -c ./phpunit.xml --do-not-cache-result",
+        "test": "vendor/bin/phpunit -c ./phpunit.xml --do-not-cache-result --no-coverage",
+        "test:gate": [
+            "@phpunit:coverage",
+            "@coverage:gate"
+        ],
+        "test:coverage": "XDEBUG_MODE=coverage vendor/bin/phpunit -c ./phpunit.xml --coverage-html reports/ --coverage-text",
+        "cs": "@check:code",
+        "cs:fix": "@fix:code",
+        "stan": "@check:security",
+        "check": [
+            "@check:code",
+            "@check:security"
+        ],
+        "coverage:gate": "php bin/coverage-gate",
+        "auto-scripts": {
+            "cache:clear": "symfony-cmd",
+            "assets:install %PUBLIC_DIR%": "symfony-cmd"
+        }
+    },
+    "scripts-descriptions": {
+        "test": "Run the suite without coverage \u2014 the fast local loop",
+        "phpunit:coverage": "Run the suite with coverage and enforce the 100% line/method gate",
+        "check": "Everything CI checks except the tests",
+        "coverage:gate": "Fail if line or method coverage is below 100%. Reads the report phpunit:coverage wrote"
+    },
+    "extra": {
+        "branch-alias": {
+            "dev-main": "1.0-dev"
+        }
+    },
+    "prefer-stable": true,
+    "minimum-stability": "stable",
+    "config": {
+        "optimize-autoloader": true,
+        "sort-packages": true,
+        "allow-plugins": {
+            "dealerdirect/phpcodesniffer-composer-installer": true
+        }
+    }
+}

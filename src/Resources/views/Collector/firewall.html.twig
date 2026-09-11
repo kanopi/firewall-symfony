@@ -1,0 +1,201 @@
+{% extends '@WebProfiler/Profiler/layout.html.twig' %}
+
+{#
+  The panel exists because the two questions an operator actually has during
+  an incident — "did the firewall look at this request, and what did it
+  decide?" and "is the firewall healthy enough for that answer to mean
+  anything?" — have no other answer inside a request. The exceptions carry a
+  status and a message; the log line is somewhere else; and a rule whose
+  backend is unreachable looks exactly like a rule that matched nothing.
+#}
+
+{% set fw = collector.data %}
+
+{% block toolbar %}
+    {% set verdict = fw.verdict|default('not evaluated') %}
+    {% set unhealthy = fw.failed_rules|default([])|length + fw.degraded_backends|default([])|length %}
+    {% set colour = verdict in ['blocked', 'challenge failed'] ? 'red'
+        : (verdict in ['challenged', 'challenge solved'] or unhealthy > 0 or fw.error|default(null) ? 'yellow' : '') %}
+
+    {% set icon %}
+        <span class="sf-toolbar-value">{{ verdict }}</span>
+    {% endset %}
+
+    {% set text %}
+        <div class="sf-toolbar-info-piece">
+            <b>Verdict</b>
+            <span>{{ verdict }}{% if fw.enforced is same as(false) %} (observed only){% endif %}</span>
+        </div>
+        {% if fw.rule %}
+            <div class="sf-toolbar-info-piece">
+                <b>Matched rule</b>
+                <span>{{ fw.rule.name }}</span>
+            </div>
+        {% endif %}
+        <div class="sf-toolbar-info-piece">
+            <b>Mode</b>
+            <span>{{ fw.mode|default('—') }}</span>
+        </div>
+        {% if unhealthy > 0 %}
+            <div class="sf-toolbar-info-piece">
+                <b>Unhealthy</b>
+                <span>{{ unhealthy }}</span>
+            </div>
+        {% endif %}
+    {% endset %}
+
+    {{ include('@WebProfiler/Profiler/toolbar_item.html.twig', { link: true, status: colour }) }}
+{% endblock %}
+
+{% block menu %}
+    <span class="label{{ fw.failed_rules|default([])|length + fw.degraded_backends|default([])|length > 0 or fw.error|default(null) ? ' label-status-error' : '' }}">
+        <strong>Firewall</strong>
+        <span class="count"><span>{{ fw.verdict|default('n/a') }}</span></span>
+    </span>
+{% endblock %}
+
+{% block panel %}
+    <h2>Firewall</h2>
+
+    <p class="help">
+        <code>kanopi/firewall</code>, which refuses hostile traffic. Not
+        <code>security.firewalls</code>, which is authentication.
+    </p>
+
+    {% if fw.error %}
+        <div class="status-error">
+            <p>{{ fw.error }}</p>
+        </div>
+    {% endif %}
+
+    <div class="metrics">
+        <div class="metric">
+            <span class="value">{{ fw.verdict|default('n/a') }}</span>
+            <span class="label">Verdict</span>
+        </div>
+        <div class="metric">
+            <span class="value">{{ fw.mode|default('—') }}</span>
+            <span class="label">Mode</span>
+        </div>
+        {% if fw.status_code %}
+            <div class="metric">
+                <span class="value">{{ fw.status_code }}</span>
+                <span class="label">Status sent</span>
+            </div>
+        {% endif %}
+    </div>
+
+    {% if fw.enforced is same as(false) %}
+        <div class="status-warning">
+            <p>
+                This decision was recorded, not applied — the firewall is in
+                <code>observe</code> mode, so the request continued.
+            </p>
+        </div>
+    {% endif %}
+
+    {% if fw.panic_switch and fw.panic_switch.active %}
+        <div class="status-warning">
+            <p>
+                <strong>The panic switch is active.</strong> Configured mode
+                <code>{{ fw.configured_mode }}</code> is being overridden to
+                <code>{{ fw.mode }}</code> by
+                <code>{{ fw.panic_switch.path }}</code>. Delete that file to
+                restore the configured mode.
+            </p>
+        </div>
+    {% elseif fw.panic_switch and fw.panic_switch.problem %}
+        <div class="status-error">
+            <p>
+                A panic file exists at <code>{{ fw.panic_switch.path }}</code>
+                and was <strong>not</strong> applied:
+                {{ fw.panic_switch.problem }}. Somebody reached for the switch
+                and it did not take.
+            </p>
+        </div>
+    {% endif %}
+
+    <h3>Decision</h3>
+
+    <table>
+        <tbody>
+            <tr>
+                <th>Verdict</th>
+                <td>{{ fw.verdict|default('not evaluated') }}</td>
+            </tr>
+            <tr>
+                <th>Matched rule</th>
+                <td>
+                    {% if fw.rule %}
+                        {{ fw.rule.name }} <span class="text-muted">({{ fw.rule.class }})</span>
+                    {% else %}
+                        <span class="text-muted">none — nothing objected, or a durable block-list hit</span>
+                    {% endif %}
+                </td>
+            </tr>
+            {% if fw.provider %}
+                <tr>
+                    <th>Challenge provider</th>
+                    <td>{{ fw.provider }}</td>
+                </tr>
+            {% endif %}
+            {% if fw.reason %}
+                <tr>
+                    <th>Refused because</th>
+                    <td>{{ fw.reason }}</td>
+                </tr>
+            {% endif %}
+            <tr>
+                <th>Configured mode</th>
+                <td>{{ fw.configured_mode|default('—') }}</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <h3>Health</h3>
+
+    <p class="help">
+        A rule in the first table <strong>is not running</strong>. A backend
+        in the second <strong>is running and has nothing to consult</strong> —
+        it answers every read as though the store were empty, so the rules
+        that depend on it allow everything while looking healthy.
+    </p>
+
+    <h4>Rules that failed to build</h4>
+
+    {% if fw.failed_rules|default([])|length == 0 %}
+        <div class="empty"><p>Every configured rule is constructed and active.</p></div>
+    {% else %}
+        <table>
+            <thead><tr><th>Bucket</th><th>Rule</th><th>Error</th></tr></thead>
+            <tbody>
+                {% for rule in fw.failed_rules %}
+                    <tr>
+                        <td>{{ rule.bucket }}</td>
+                        <td>{{ rule.plugin }}</td>
+                        <td>{{ rule.error }}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% endif %}
+
+    <h4>Backends running blind</h4>
+
+    {% if fw.degraded_backends|default([])|length == 0 %}
+        <div class="empty"><p>Every backend reached its server.</p></div>
+    {% else %}
+        <table>
+            <thead><tr><th>Component</th><th>Backend</th><th>Error</th></tr></thead>
+            <tbody>
+                {% for backend in fw.degraded_backends %}
+                    <tr>
+                        <td>{{ backend.component|default('—') }}</td>
+                        <td>{{ backend.backend|default('—') }}</td>
+                        <td>{{ backend.error|default('—') }}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% endif %}
+{% endblock %}

@@ -1,0 +1,108 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+/*
+ * This file is part of the kanopi/firewall-symfony package.
+ *
+ * For the full copyright and license information, please view the LICENSE
+ * file that was distributed with this source code.
+ */
+
+/*
+ * Fail the build when line or method coverage slips below 100%.
+ *
+ * PHPUnit has no configuration for a minimum, and `--coverage-text` alone
+ * only prints a number nobody reads in CI. This reads the XML report the
+ * same run produced and exits non-zero, which is the part that stops a
+ * merge.
+ *
+ * Usage:
+ *   bin/coverage-gate [reports/xml/index.xml] [--min=100]
+ *
+ * Exit codes:
+ *   0  at or above the threshold
+ *   1  below it
+ *   2  no report to read — the coverage run did not happen
+ */
+
+$arguments = array_slice($argv, 1);
+$report = 'reports/xml/index.xml';
+$minimum = 100.0;
+
+foreach ($arguments as $argument) {
+    if (str_starts_with($argument, '--min=')) {
+        $minimum = (float) substr($argument, 6);
+        continue;
+    }
+
+    $report = $argument;
+}
+
+if (!is_file($report)) {
+    fwrite(STDERR, sprintf(
+        "No coverage report at %s. Run `composer phpunit:coverage` with XDEBUG_MODE=coverage first.\n",
+        $report
+    ));
+
+    exit(2);
+}
+
+$xml = @simplexml_load_file($report);
+
+if ($xml === false) {
+    fwrite(STDERR, sprintf("Could not parse the coverage report at %s.\n", $report));
+
+    exit(2);
+}
+
+// The report carries a default namespace, so an unprefixed XPath matches
+// nothing at all — silently, which is how a coverage gate ends up passing
+// without ever reading a number.
+$xml->registerXPathNamespace('c', 'https://schema.phpunit.de/coverage/1.0');
+// The report carries a default namespace, so an unprefixed XPath matches
+// nothing at all -- silently, which is how a coverage gate ends up passing
+// without ever reading a number.
+$xml->registerXPathNamespace('c', 'https://schema.phpunit.de/coverage/1.0');
+$totals = $xml->xpath('/c:phpunit/c:project/c:directory[@name="/"]/c:totals');
+
+if ($totals === null || $totals === []) {
+    fwrite(STDERR, sprintf("No project totals in %s.\n", $report));
+
+    exit(2);
+}
+
+$failed = false;
+
+// Lines and methods, because they fail differently. A method reached once
+// from a happy path can be fully line-covered while the branch that matters
+// never runs; a method reached from nowhere shows up only in the second
+// figure.
+$measures = [
+    'lines' => ['executable', 'executed'],
+    'methods' => ['count', 'tested'],
+];
+
+foreach ($measures as $element => [$totalAttribute, $coveredAttribute]) {
+    $node = $totals[0]->{$element};
+    $all = (int) $node[$totalAttribute];
+    $hit = (int) $node[$coveredAttribute];
+    $percent = $all === 0 ? 100.0 : $hit / $all * 100;
+
+    printf("  %-8s %7.2f%% (%d/%d)\n", $element, $percent, $hit, $all);
+
+    // A hair of tolerance so a threshold written as 100 is not defeated by
+    // binary floating point on an exact 100%.
+    if ($percent + 0.0001 < $minimum) {
+        fwrite(STDERR, sprintf(
+            "Coverage gate: %s coverage is %.2f%%, below the required %.2f%%.\n",
+            $element,
+            $percent,
+            $minimum
+        ));
+        $failed = true;
+    }
+}
+
+exit($failed ? 1 : 0);

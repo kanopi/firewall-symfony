@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<phpunit xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:noNamespaceSchemaLocation="vendor/phpunit/phpunit/phpunit.xsd"
+         bootstrap="vendor/autoload.php"
+         cacheDirectory=".phpunit.cache"
+         colors="true"
+         backupGlobals="false"
+         failOnRisky="true"
+         failOnWarning="true"
+         displayDetailsOnTestsThatTriggerWarnings="true"
+         displayDetailsOnTestsThatTriggerDeprecations="true"
+         displayDetailsOnPhpunitDeprecations="true">
+  <testsuites>
+    <testsuite name="unit">
+      <directory suffix="Test.php">tests/Unit</directory>
+    </testsuite>
+    <testsuite name="integration">
+      <directory suffix="Test.php">tests/Integration</directory>
+    </testsuite>
+  </testsuites>
+  <coverage>
+    <report>
+      <html outputDirectory="reports"/>
+      <text outputFile="reports/coverage.txt" showUncoveredFiles="true" showOnlySummary="false"/>
+      <xml outputDirectory="reports/xml"/>
+    </report>
+  </coverage>
+  <logging>
+    <junit outputFile="reports/junit.xml"/>
+  </logging>
+  <source>
+    <include>
+      <directory suffix=".php">src/</directory>
+    </include>
+    <exclude>
+      <!--
+        Service definitions, not code: a closure the DI loader executes.
+        Its behaviour is covered by the container tests, which compile it
+        and assert on the resulting definitions, but PHPUnit cannot
+        attribute those executed lines to a file that declares no class.
+      -->
+      <file>src/Resources/config/services.php</file>
+    </exclude>
+  </source>
+  <php>
+    <ini name="memory_limit" value="512M"/>
+
+        <!-- ###+ symfony/framework-bundle ### -->
+        <env name="APP_ENV" value="dev"/>
+        <env name="APP_SECRET" value=""/>
+        <env name="APP_SHARE_DIR" value="var/share"/>
+        <!-- ###- symfony/framework-bundle ### -->
+  </php>
+</phpunit>

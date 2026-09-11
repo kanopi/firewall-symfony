@@ -1,0 +1,9 @@
+# Pulls its only rule in through `configs:`, the way a preset arrives.
+#
+# The library resolves this while loading and removes the key, so the merged
+# document names no include — which is why ConfigSnapshot does not try to
+# report one.
+configs:
+  - ./block.yml
+global:
+  behind_proxy: false

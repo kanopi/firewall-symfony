@@ -1,0 +1,25 @@
+<?xml version="1.0"?>
+<ruleset name="FirewallSymfony">
+    <description>kanopi/firewall-symfony coding standards — the parent project's, at its PHP floor.</description>
+
+    <rule ref="Generic.Files.LineLength">
+        <properties>
+            <property name="ignoreComments" value="true"/>
+        </properties>
+    </rule>
+
+    <rule ref="PSR1"/>
+    <rule ref="PSR2"/>
+    <rule ref="PSR12"/>
+    <rule ref="PHPCompatibility"/>
+
+    <exclude-pattern>/vendor/*</exclude-pattern>
+
+    <arg name="warning-severity" value="0"/>
+
+    <!--
+      8.1, not the parent's 8.2: this package supports the same floor as the
+      library, and 8.1 resolves an entirely different Symfony (6.4).
+    -->
+    <config name="testVersion" value="8.1-"/>
+</ruleset>

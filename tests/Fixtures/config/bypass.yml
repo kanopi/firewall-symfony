@@ -1,0 +1,24 @@
+# One address is waved through before any blocking rule is consulted.
+global:
+  behind_proxy: false
+storage:
+  type: Kanopi\Firewall\Storage\InMemoryStorage
+logger:
+  handlers:
+    - class: Monolog\Handler\NullHandler
+plugins:
+  - plugin: "Kanopi\\Firewall\\Plugins\\IpAddress"
+    response: allow
+    weight: -100
+    enable: true
+    metadata:
+      name: test-allow-ip
+    config:
+      - 198.51.100.7
+  - plugin: "Kanopi\\Firewall\\Plugins\\IpAddress"
+    response: block
+    enable: true
+    metadata:
+      name: test-block-everything
+    config:
+      - 0.0.0.0/0
