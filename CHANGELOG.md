@@ -64,6 +64,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- CI recorded no test results, and said nothing about it. `store_test_results` was pointed
+  at `reports/`, so it parsed PHPUnit's 43 coverage XML files as JUnit and rejected every
+  one of them — failing the upload step in all thirteen test jobs. CircleCI does not fail a
+  job for that, so the first full run was green with an empty test-results tab. The JUnit
+  file now has a directory to itself and the step points at that.
 - The `--prefer-lowest` CI job could never have passed. `phpunit.xml` sets
   `displayDetailsOnPhpunitDeprecations`, which PHPUnit added in **10.5.32**, while the
   constraint allowed `^10.5` — so the floor job resolved 10.5.0, failed XML schema

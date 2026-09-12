@@ -26,7 +26,16 @@
     </report>
   </coverage>
   <logging>
-    <junit outputFile="reports/junit.xml"/>
+    <!--
+      In a directory of its own, holding nothing else. CircleCI's
+      `store_test_results` takes a directory and parses every XML file under
+      it as JUnit — which, pointed at `reports/`, meant the 43 files of
+      PHPUnit's coverage XML as well, each rejected with "invalid top level
+      element: phpunit". That failed the upload step in all thirteen test
+      jobs while the tests themselves passed, so the run was green and the
+      test results were never recorded.
+    -->
+    <junit outputFile="reports/junit/junit.xml"/>
   </logging>
   <source>
     <include>

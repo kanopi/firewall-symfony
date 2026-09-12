@@ -159,7 +159,12 @@ jobs:
           # which puts the argument somewhere a reviewer sees it.
           command: composer -n coverage:gate
       - store_test_results:
-          path: reports
+          # The JUnit file's own directory, not `reports/` — see the comment
+          # in phpunit.xml. This path must hold nothing but JUnit XML: the
+          # step parses everything under it and fails on the first file that
+          # is not, which is how the coverage report silently cost this
+          # project its test results.
+          path: reports/junit
       - store_artifacts:
           path: reports
 
