@@ -1,0 +1,270 @@
+#!/usr/bin/env bash
+
+#
+# This file is part of the kanopi/firewall-symfony package.
+#
+# For the full copyright and license information, please view the LICENSE
+# file that was distributed with this source code.
+#
+
+#
+# Run a CI matrix cell locally, in the image CI uses.
+#
+# ## Why this exists
+#
+# The matrix is five PHP versions wide, and a developer's machine has one.
+# Everything this package gets wrong across that axis is invisible from the
+# one version installed: a syntax feature above the 8.1 floor, a deprecation
+# that only PHP 8.5 emits, a Symfony API that moved between 6.4 and 8.1. The
+# first two are exactly what a CI run is for — and waiting on a push to find
+# out is the slow way round when Docker can run the same job in a minute.
+#
+# So this is CI's job body, extracted: the same `cimg/php` image, the same
+# global Flex install pinning every symfony/* package onto one line, the same
+# checks in the same order. When a cell fails here it fails there, and the
+# other way round.
+#
+# ## What it deliberately does not do
+#
+# **It reads the tree once per cell, when that cell starts.** Editing the
+# checkout during a run changes what the later cells test, which is worth
+# knowing before it costs an afternoon.
+#
+# **It does not touch the working tree.** The repository is mounted read-only
+# and copied inside the container, without `vendor/`, `composer.lock` or
+# `reports/`. So a matrix run cannot leave your local install resolved onto
+# Symfony 6.4, which is the mistake this replaces — and several cells can run
+# one after another without fighting over one `vendor/`.
+#
+# **Coverage is off unless asked for.** The gate is a real CI check, and
+# reaching it needs Xdebug compiled from PECL inside the container, which
+# costs minutes per cell. Line coverage does not vary by PHP version in any
+# way this package's tests can express, so paying that on every cell buys
+# nothing. `--coverage` is there for the run before a release.
+#
+# Usage:
+#   bin/test-matrix                                  every cell CI runs
+#   bin/test-matrix --php=8.1 --symfony=6.4.*        one cell
+#   bin/test-matrix --php=8.1 --symfony=6.4.* --deps=lowest
+#   bin/test-matrix --php=8.5 --symfony=8.1.* --coverage
+#   bin/test-matrix --only=phpunit                   skip PHPCS and PHPStan
+#
+# Exit codes:
+#   0  every cell passed
+#   1  a cell failed — the summary says which
+#   2  Docker is not available, or the arguments made no sense
+#
+
+set -euo pipefail
+
+readonly REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# Composer's cache, shared by every cell. A named volume rather than a host
+# path: the first cell pays for the downloads and the rest do not, and
+# nothing is written into the checkout.
+readonly CACHE_VOLUME="kanopi-firewall-symfony-matrix-cache"
+
+# The matrix from .circleci/config.yml, with its exclusions already applied:
+# Symfony 7.x needs PHP 8.2, and Symfony 8.1 needs PHP 8.4.1. A pair below a
+# line's own floor has no resolution and would only ever report the same
+# upstream conflict.
+readonly DEFAULT_CELLS=(
+    "8.1 6.4.* highest"
+    "8.2 6.4.* highest"
+    "8.2 7.4.* highest"
+    "8.3 6.4.* highest"
+    "8.3 7.4.* highest"
+    "8.4 6.4.* highest"
+    "8.4 7.4.* highest"
+    "8.4 8.1.* highest"
+    "8.5 6.4.* highest"
+    "8.5 7.4.* highest"
+    "8.5 8.1.* highest"
+    # The floors. `~6.4` and `~8.1` promise that 6.4.0 and 8.1.0 work, and no
+    # other cell checks that: every one of them resolves the newest patch.
+    "8.1 6.4.* lowest"
+    "8.4 8.1.* lowest"
+)
+
+php=""
+symfony=""
+deps="highest"
+only="all"
+coverage="no"
+
+for argument in "$@"; do
+    case "$argument" in
+        --php=*) php="${argument#*=}" ;;
+        --symfony=*) symfony="${argument#*=}" ;;
+        --deps=*) deps="${argument#*=}" ;;
+        --only=*) only="${argument#*=}" ;;
+        --coverage) coverage="yes" ;;
+        -h|--help)
+            sed -n '/^# Usage:/,/^#$/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+            exit 0
+            ;;
+        *)
+            echo "Unknown argument: $argument. Try --help." >&2
+            exit 2
+            ;;
+    esac
+done
+
+if ! docker version >/dev/null 2>&1; then
+    echo "Docker is not running, and this needs it: the PHP versions CI covers are not on this machine." >&2
+    exit 2
+fi
+
+case "$deps" in
+    highest|lowest) ;;
+    *) echo "--deps must be highest or lowest, not $deps" >&2; exit 2 ;;
+esac
+
+case "$only" in
+    all|phpunit|static) ;;
+    *) echo "--only must be all, phpunit or static, not $only" >&2; exit 2 ;;
+esac
+
+# One cell when either half was named, the whole matrix when neither was.
+# Naming only one is refused rather than guessed at: "--php=8.1" could mean
+# every Symfony line on 8.1 or the default line on 8.1, and picking wrong
+# runs the wrong job silently.
+cells=()
+if [ -n "$php" ] && [ -n "$symfony" ]; then
+    cells=("$php $symfony $deps")
+elif [ -n "$php" ] || [ -n "$symfony" ]; then
+    echo "Name both --php and --symfony, or neither to run the whole matrix." >&2
+    exit 2
+else
+    cells=("${DEFAULT_CELLS[@]}")
+fi
+
+# The body of the CI job, as the container runs it. Written once here rather
+# than assembled per cell, so there is one place where this can drift from
+# .circleci/config.yml.
+read -r -d '' CELL_SCRIPT <<'INNER' || true
+set -eu
+
+SYMFONY_LINE="$1"
+DEPENDENCIES="$2"
+ONLY="$3"
+COVERAGE="$4"
+
+# Copied rather than worked on in place: the mount is read-only, and a build
+# that wrote into it would resolve the developer's own vendor/ onto whatever
+# line this cell is testing.
+mkdir -p "$HOME/build"
+tar -C /repo \
+    --exclude=./vendor \
+    --exclude=./reports \
+    --exclude=./.git \
+    --exclude=./.phpunit.cache \
+    --exclude=./composer.lock \
+    -cf - . | tar -C "$HOME/build" -xf -
+cd "$HOME/build"
+
+# Each cell copies the tree as it finds it, so an edit still in progress on
+# the host lands in the container. Composer reports that as a parse error
+# inside a job that has nothing to do with it, which sent one matrix run
+# looking for a Symfony 7.4 incompatibility that did not exist.
+php -r 'if (json_decode(file_get_contents("composer.json")) === null) {
+    fwrite(STDERR, "composer.json is not valid JSON in this copy of the checkout.\n"
+        . "A cell copies the tree when it starts, so this usually means it was mid-edit.\n");
+    exit(2);
+}'
+
+export SYMFONY_REQUIRE="$SYMFONY_LINE"
+
+# The copy carries no .git, so Composer cannot infer a root version and says
+# so on every command it runs. Stated here instead, as the branch alias in
+# composer.json already does.
+export COMPOSER_ROOT_VERSION="1.0.x-dev"
+
+composer global config --no-plugins allow-plugins.symfony/flex true
+composer global require --no-interaction --no-progress --quiet symfony/flex
+
+if [ "$DEPENDENCIES" = "lowest" ]; then
+    composer update -W --prefer-lowest --prefer-stable --no-interaction --no-progress --quiet
+else
+    composer update -W --no-interaction --no-progress --quiet --optimize-autoloader
+fi
+
+# A no-op with Flex installed globally, and kept as a safety net: if it ever
+# does write an application skeleton here, PHPCS and PHPStan would be handed
+# files that are not this package's.
+rm -rf config public bin/console bin/phpunit tests/bootstrap.php \
+       phpunit.dist.xml .editorconfig .env .env.dev .env.test \
+       symfony.lock var AGENTS.md CLAUDE.md src/Kernel.php src/Controller
+
+# Asserted, not just printed. A cell that quietly resolved a different line
+# than it claims is the exact failure this axis exists to close, and it would
+# otherwise report a confident false pass.
+EXPECTED="$(echo "$SYMFONY_LINE" | cut -d. -f1,2)"
+PKGS="$(composer show 'symfony/*' --name-only 2>/dev/null \
+    | grep -vE 'polyfill|contracts|flex|monolog-bundle' || true)"
+
+[ -n "$PKGS" ] || { echo "no symfony/* packages resolved"; exit 1; }
+
+for PKG in $PKGS; do
+    ACTUAL="$(composer show "$PKG" | awk '/^versions/ {print $NF}' | tr -d 'v' | cut -d. -f1,2)"
+    if [ "$ACTUAL" != "$EXPECTED" ]; then
+        echo "MISMATCH $PKG is $ACTUAL, expected $EXPECTED"
+        exit 1
+    fi
+done
+
+echo "--- resolved: PHP $(php -r 'echo PHP_VERSION;'), Symfony $(composer show symfony/http-kernel | awk '/^versions/ {print $NF}'), PHPUnit $(composer show phpunit/phpunit | awk '/^versions/ {print $NF}')"
+
+if [ "$ONLY" != "phpunit" ]; then
+    echo "--- PHPCS"
+    composer -n check:code
+    echo "--- PHPStan (max)"
+    composer -n check:security
+fi
+
+if [ "$ONLY" != "static" ]; then
+    if [ "$COVERAGE" = "yes" ]; then
+        echo "--- Installing Xdebug"
+        sudo pecl install xdebug >/dev/null 2>&1 || sudo pecl install xdebug
+        echo "--- PHPUnit with coverage, then the 100% gate"
+        XDEBUG_MODE=coverage composer -n phpunit:coverage
+        composer -n coverage:gate
+    else
+        echo "--- PHPUnit"
+        composer -n test
+    fi
+fi
+INNER
+
+results=()
+failed=0
+
+for cell in "${cells[@]}"; do
+    read -r cell_php cell_symfony cell_deps <<<"$cell"
+    label="php${cell_php}-sf${cell_symfony%.\*}${cell_deps:+-$cell_deps}"
+
+    echo
+    echo "=============================================================================="
+    echo "  $label"
+    echo "=============================================================================="
+
+    if docker run --rm \
+        --volume "$REPO_ROOT":/repo:ro \
+        --volume "$CACHE_VOLUME":/home/circleci/.cache/composer \
+        --workdir /home/circleci \
+        "cimg/php:$cell_php" \
+        bash -c "$CELL_SCRIPT" -- "$cell_symfony" "$cell_deps" "$only" "$coverage"
+    then
+        results+=("PASS  $label")
+    else
+        results+=("FAIL  $label")
+        failed=1
+    fi
+done
+
+echo
+echo "=============================================================================="
+printf '%s\n' "${results[@]}"
+echo "=============================================================================="
+
+exit "$failed"

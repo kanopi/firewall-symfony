@@ -47,6 +47,12 @@ All notable changes to this project are documented here. The format follows
   permanently and silently. Tracked upstream as
   [kanopi/firewall#311](https://github.com/kanopi/firewall/issues/311).
 
+- `bin/test-matrix` (`composer test:matrix`), which runs any CI matrix cell locally in the
+  `cimg/php` image CI uses — same global Flex install, same line pinning, same checks in
+  the same order. A machine has one PHP version and the matrix is five wide, so everything
+  this package could get wrong across that axis was invisible until something else ran it.
+  It found two failures on its first full pass, both below.
+
 ### Changed
 
 - `kanopi:firewall:block` is now the command that blocks one address, and the wrapper
@@ -58,6 +64,15 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- The `--prefer-lowest` CI job could never have passed. `phpunit.xml` sets
+  `displayDetailsOnPhpunitDeprecations`, which PHPUnit added in **10.5.32**, while the
+  constraint allowed `^10.5` — so the floor job resolved 10.5.0, failed XML schema
+  validation, and turned that into a test-runner warning that `failOnWarning` made fatal.
+  The floor is now `^10.5.32`. Found by running the matrix in Docker; it had never run.
+- PHPStan at max reported `$argv` as possibly undefined in the test fixture that stands in
+  for a shipped `bin/` script — on PHP 8.5 only, so every job below that version passed.
+  The fixture is excluded from analysis the way the package's other script-shaped fixture
+  already is.
 - The wrapped console commands diagnosed a configuration nobody runs. They were handed
   only `config_files`, so inline `settings` and every bundle-level override were invisible
   to them — and `kanopi:firewall:doctor` reported a fatal "challenge.secret is empty" for

@@ -579,13 +579,32 @@ on every PHP version — `http-kernel` and `framework-bundle` at 7.4 while `cons
 8.x line was never actually exercised, and it hid a real break:
 `Console\Application::add()` was removed in Symfony 8.
 
-To reproduce a single job locally:
+To run any of those jobs locally, in the image CI uses:
+
+```bash
+composer test:matrix                                   # every cell, ~15 minutes
+composer test:matrix -- --php=8.1 --symfony=6.4.*      # one cell
+composer test:matrix -- --php=8.1 --symfony=6.4.* --deps=lowest
+composer test:matrix -- --php=8.5 --symfony=8.1.* --coverage
+```
+
+That is `bin/test-matrix`, and it needs Docker and nothing else — the point being that a
+machine has one PHP version and the matrix is five wide, so the failures that only appear
+on 8.1 or 8.5 are invisible until something else runs them. It mounts the checkout
+read-only and builds inside the container, so a matrix run cannot leave your own `vendor/`
+resolved onto Symfony 6.4. Coverage is off unless you ask, because reaching the gate means
+compiling Xdebug from PECL in each container and line coverage does not vary by PHP
+version in any way these tests can express.
+
+Without Docker, the same job by hand:
 
 ```bash
 composer global require symfony/flex
 SYMFONY_REQUIRE=6.4.* composer update -W
 composer test
 ```
+
+Note what that does to the checkout: it resolves `vendor/` onto 6.4 until you update back.
 
 Install Flex **globally**, not into this package. As a dev dependency it writes a Symfony
 application skeleton (`config/`, `public/`, `bin/console`, `.env`) into the checkout —

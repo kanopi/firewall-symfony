@@ -15,3 +15,12 @@ parameters:
             # Integration\WebSapiObserveModeTest. Superglobals and a
             # hand-rolled bootstrap, and not part of the package.
             - tests/Fixtures/server/index.php
+            # The body of the stand-in for a shipped bin/ script, required by
+            # the eight fixtures named after the scripts they replace. It
+            # reads `$argv`, which exists because it only ever runs as a CLI
+            # script -- and which PHPStan reports as possibly undefined when
+            # it is analysing on PHP 8.5, and only there. The scripts it
+            # stands in for are excluded from analysis by having no `.php`
+            # extension; this one has the extension because it is required
+            # rather than executed, so it says so here instead.
+            - tests/Fixtures/bin/stub.php
