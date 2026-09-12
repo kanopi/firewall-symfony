@@ -1,0 +1,224 @@
+version: 2.1
+
+# Two axes, because one does not imply the other.
+#
+# A PHP-only matrix was not enough. Composer's solver settled on a *mixed*
+# Symfony set on every PHP version — http-kernel, framework-bundle and
+# dependency-injection at 7.4 while cache, http-foundation, process and
+# event-dispatcher sat at 8.1. No application runs that combination, and it
+# meant the 8.x line was never exercised at all. It hid a real break:
+# `Console\Application::add()` was removed in Symfony 8.
+#
+# Pinning is done the way a real application does it — `symfony/flex` plus
+# `SYMFONY_REQUIRE`, which rewrites every symfony/* constraint onto one line.
+#
+# Flex is installed *globally*, not as a dev dependency, for two reasons.
+# Inside composer.json it applies a Symfony application skeleton (`config/`,
+# `public/`, `bin/console`, `.env`) into the library checkout, and
+# `--no-scripts` does not stop it. And it would then be subject to
+# `--prefer-lowest`, which resolves it to v2.0.1 — a version that fatals on
+# a current Composer, so the floor job died before it ran anything. Globally
+# it is tooling: outside the graph, unaffected by the resolver, and it
+# applies no recipes.
+#
+# Two things are deliberately absent from the matrix:
+#
+#   * Symfony 8.0. `kanopi/firewall` requires `~6.4 || ~7.3 || ~8.1`, which
+#     skips the 8.0 line, so no resolution exists — a job for it could only
+#     ever report the same upstream conflict. Supporting 8.0 needs a change
+#     to the library first.
+#   * Pairs below a line's own PHP floor: Symfony 7.x needs PHP 8.2 and
+#     Symfony 8.1 needs PHP 8.4.1. Excluded below rather than left to fail
+#     as an unresolvable install.
+
+PHP_DEFAULT: &PHP_DEFAULT "8.2"
+
+commands:
+  install:
+    description: Install dependencies with every symfony/* package on one line.
+    parameters:
+      symfony:
+        type: string
+      dependencies:
+        type: string
+    steps:
+      - run:
+          name: Install dependencies (Symfony << parameters.symfony >>)
+          command: |
+            set -eu
+            composer global config --no-plugins allow-plugins.symfony/flex true
+            composer global require --no-interaction --no-progress symfony/flex
+
+            if [ "<< parameters.dependencies >>" = "lowest" ]; then
+              composer update -W --prefer-lowest --prefer-stable --no-interaction --no-progress
+            else
+              composer update -W --no-interaction --no-progress --optimize-autoloader
+            fi
+
+            # A no-op with Flex installed globally, and kept as a safety net:
+            # if it ever does write an application skeleton here, PHPCS and
+            # PHPStan would be handed files that are not this package's.
+            rm -rf config public bin/console bin/phpunit tests/bootstrap.php \
+                   phpunit.dist.xml .editorconfig .env .env.dev .env.test \
+                   symfony.lock var AGENTS.md CLAUDE.md src/Kernel.php src/Controller
+      - run:
+          name: Confirm every symfony/* package is on << parameters.symfony >>
+          # Asserted, not just printed. A job that quietly resolved a
+          # different line than it claims is the exact failure this axis
+          # exists to close, and it would otherwise report a confident false
+          # pass. Contracts and polyfills are versioned independently of the
+          # release line and are skipped.
+          command: |
+            set -eu
+            EXPECTED="$(echo "<< parameters.symfony >>" | cut -d. -f1,2)"
+            PKGS="$(composer show 'symfony/*' --name-only 2>/dev/null \
+              | grep -vE 'polyfill|contracts|flex|monolog-bundle' || true)"
+
+            # A guard that finds nothing to check is a guard that always
+            # passes, which is worse than not having one.
+            [ -n "$PKGS" ] || { echo "no symfony/* packages resolved"; exit 1; }
+
+            FAILED=0
+            for PKG in $PKGS; do
+              ACTUAL="$(composer show "$PKG" | awk '/^versions/ {print $NF}' | tr -d 'v' | cut -d. -f1,2)"
+              if [ "$ACTUAL" != "$EXPECTED" ]; then
+                echo "MISMATCH $PKG is $ACTUAL, expected $EXPECTED"
+                FAILED=1
+              else
+                echo "ok       $PKG $ACTUAL"
+              fi
+            done
+
+            exit "$FAILED"
+
+
+jobs:
+  static-analysis:
+    parameters:
+      php:
+        type: string
+        default: *PHP_DEFAULT
+      symfony:
+        type: string
+        default: "7.4.*"
+    docker:
+      - image: cimg/php:<< parameters.php >>
+    resource_class: small
+    environment:
+      SYMFONY_REQUIRE: << parameters.symfony >>
+    steps:
+      - checkout
+      - install:
+          symfony: << parameters.symfony >>
+          dependencies: highest
+      - run:
+          name: PHPCS
+          command: composer -n check:code
+      - run:
+          name: PHPStan (max)
+          command: composer -n check:security
+
+  phpunit:
+    parameters:
+      php:
+        type: string
+        default: *PHP_DEFAULT
+      symfony:
+        type: string
+        default: "7.4.*"
+      dependencies:
+        # `lowest` is not a formality: on PHP 8.1 it pins the oldest patch of
+        # Symfony 6.4 and PHPUnit 10, a materially different codebase from
+        # the line every other job exercises.
+        type: enum
+        enum: ['highest', 'lowest']
+        default: 'highest'
+    docker:
+      - image: cimg/php:<< parameters.php >>
+    resource_class: small
+    environment:
+      SYMFONY_REQUIRE: << parameters.symfony >>
+    steps:
+      - checkout
+      - run:
+          name: Install Xdebug
+          command: |
+            sudo pecl update-channels
+            sudo pecl install xdebug
+      - install:
+          symfony: << parameters.symfony >>
+          dependencies: << parameters.dependencies >>
+      - run:
+          name: PHPUnit with coverage
+          command: XDEBUG_MODE=coverage composer -n phpunit:coverage
+      - run:
+          name: Coverage gate
+          # 100% of lines and methods. A real constraint, not a vanity
+          # number: a new branch has to arrive with a test, or with an
+          # explicit @codeCoverageIgnore saying why it cannot have one —
+          # which puts the argument somewhere a reviewer sees it.
+          command: composer -n coverage:gate
+      - store_test_results:
+          path: reports
+      - store_artifacts:
+          path: reports
+
+workflows:
+  test:
+    jobs:
+      - static-analysis:
+          name: static-php<<matrix.php>>-sf<<matrix.symfony>>
+          matrix:
+            parameters:
+              php: ['8.1', '8.2', '8.3', '8.4', '8.5']
+              symfony: ['6.4.*', '7.4.*', '8.1.*']
+            exclude:
+              # Symfony 7.x needs PHP 8.2.
+              - php: '8.1'
+                symfony: '7.4.*'
+              # Symfony 8.1 needs PHP 8.4.1.
+              - php: '8.1'
+                symfony: '8.1.*'
+              - php: '8.2'
+                symfony: '8.1.*'
+              - php: '8.3'
+                symfony: '8.1.*'
+
+      - phpunit:
+          name: test-php<<matrix.php>>-sf<<matrix.symfony>>
+          matrix:
+            parameters:
+              php: ['8.1', '8.2', '8.3', '8.4', '8.5']
+              symfony: ['6.4.*', '7.4.*', '8.1.*']
+              dependencies: ['highest']
+            exclude:
+              - php: '8.1'
+                symfony: '7.4.*'
+                dependencies: 'highest'
+              - php: '8.1'
+                symfony: '8.1.*'
+                dependencies: 'highest'
+              - php: '8.2'
+                symfony: '8.1.*'
+                dependencies: 'highest'
+              - php: '8.3'
+                symfony: '8.1.*'
+                dependencies: 'highest'
+
+      # Floors, one per supported Symfony line. `~6.4` and `~8.1` promise
+      # that 6.4.0 and 8.1.0 work, and nothing else in the matrix checks
+      # that: every other job resolves the newest patch. The 8.1 floor
+      # earned its place immediately — at Symfony 8.1.0 a deprecation from
+      # a floor dependency printed into a fixture server's response body
+      # and broke a test that passes on 8.1.6.
+      - phpunit:
+          name: test-lowest-php8.1-sf6.4
+          php: '8.1'
+          symfony: '6.4.*'
+          dependencies: 'lowest'
+
+      - phpunit:
+          name: test-lowest-php8.4-sf8.1
+          php: '8.4'
+          symfony: '8.1.*'
+          dependencies: 'lowest'
