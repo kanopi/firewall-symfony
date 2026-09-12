@@ -11,9 +11,7 @@ declare(strict_types=1);
 
 namespace Kanopi\FirewallBundle\Http;
 
-use Kanopi\Firewall\Exception\ConfigurationException;
 use Kanopi\Firewall\Utility\Config;
-use Kanopi\Firewall\Utility\PluginConfigNormalizer;
 
 /**
  * Reads the merged `challenge:` block, and refuses one wiring the bundle
@@ -21,47 +19,36 @@ use Kanopi\Firewall\Utility\PluginConfigNormalizer;
  *
  * ## Why this loads the config a second time
  *
- * In `exception` mode the library throws `ChallengeRequiredException` *before*
- * it renders anything, so the bundle owns the interstitial — and to build one
- * it needs the secret, the provider, the submit path and the cookie name.
- * Those may have been set in the user's own `firewall.yml` rather than in
- * bundle config, and the built `Firewall` does not expose them.
+ * The pass cookie. When a visitor solves a challenge the bundle sets the
+ * cookie that carries the token, and it has to use the name the library will
+ * look for — which may have been set in the user's own `firewall.yml` rather
+ * than in bundle config, and which the built `Firewall` does not expose.
  *
- * The alternative was to require them in `kanopi_firewall.challenge.*` and
+ * The alternative was to require it in `kanopi_firewall.challenge.*` and
  * ignore the YAML. It lost because "point at the firewall.yml you already
  * have" is the main reason to use a bundle at all, and silently ignoring half
  * of that file is a worse surprise than one extra config load.
  *
  * The cost is small and off the hot path. `Config::load()` caches on the file
  * set, so the second call reuses the parse from `Firewall::create()`, and
- * this only runs when a challenge is actually being rendered — which is rare
- * by construction, and already the most expensive response the firewall
- * produces.
+ * this only runs when a challenge is actually being solved — which is rare by
+ * construction.
  *
- * ## The wiring that is refused
+ * ## What used to be here
  *
- * A rule may name its own provider with `metadata.challenge_provider`. When
- * one does, the library scopes the pass token to whichever provider actually
- * served the challenge, and the interstitial has to carry a **signed**
- * `provider_token` back so the submission handler verifies against the right
- * one. That signature is `Firewall::signProviderName()` — `protected`, over a
- * `private const` prefix — with no public equivalent.
+ * Until kanopi/firewall 2.26.0 this class did much more, and refused much
+ * more. The bundle rendered the interstitial itself, so it needed the
+ * provider, the secret and the submit path from here — and it **refused to
+ * start** for any rule carrying `metadata.challenge_provider`, because the
+ * signed `provider_token` such a rule needs was produced by a `protected`
+ * method over a `private const` prefix on a `final` class. Rendering without
+ * it was not a degraded experience but a silent permanent lockout.
  *
- * Rendering without the field is not a degraded experience, it is a lockout:
- * the submission is verified by `challenge.provider` instead, the minted
- * token carries that provider's name, the rule that named a different one
- * rejects it, and the visitor is served the same interstitial forever with
- * nothing in the logs calling it an error. So this refuses to start instead,
- * and `KanopiFirewallCacheWarmer` runs the check at `cache:clear` so the
- * refusal lands at deploy rather than on a visitor.
- *
- * Reproducing the signature here — the prefix string is knowable — was the
- * other option. It lost on the project's constraint that nothing
- * framework-specific goes back into the library and, more practically, on
- * what breaks if the library ever changes that private constant: the field
- * would fail its signature check, `resolveSubmissionProvider()` would refuse
- * the submission, and we would be back at the same silent lockout with a
- * green test suite.
+ * `ChallengeRequiredException::renderInterstitial()` ended all of that: the
+ * exception holds the provider the firewall chose and the context it built.
+ * The renderer, the cache warmer that raised the refusal at `cache:clear`,
+ * and the refusal itself are gone, and per-rule providers are supported. See
+ * kanopi/firewall#311, which was reported from this package.
  */
 final class ChallengeConfigResolver
 {
@@ -84,9 +71,6 @@ final class ChallengeConfigResolver
 
     /**
      * The challenge block, with the library's own defaults applied.
-     *
-     * @throws ConfigurationException
-     *   When any challenge rule names its own provider.
      */
     public function resolve(): ChallengeSettings
     {
@@ -96,8 +80,6 @@ final class ChallengeConfigResolver
 
         /** @var array<string, mixed> $config */
         $config = Config::load($this->configs, $this->overrides);
-
-        $this->assertNoPerRuleProviders($config);
 
         /** @var array<string, mixed> $challenge */
         $challenge = isset($config['challenge']) && is_array($config['challenge']) ? $config['challenge'] : [];
@@ -120,76 +102,6 @@ final class ChallengeConfigResolver
             $audience === '' ? $provider : $audience,
             $providerOptions
         );
-    }
-
-    /**
-     * Refuse a configuration whose challenge rules name their own providers.
-     *
-     * @param array<string, mixed> $config
-     *   The merged library configuration.
-     *
-     * @throws ConfigurationException
-     *   Naming every rule that does it, so the fix does not need a search.
-     */
-    private function assertNoPerRuleProviders(array $config): void
-    {
-        /** @var array<string, mixed> $normalized */
-        $normalized = PluginConfigNormalizer::normalize($config);
-        $plugins = is_array($normalized['plugins'] ?? null) ? $normalized['plugins'] : [];
-        $offenders = [];
-
-        foreach ($plugins as $plugin) {
-            if (!is_array($plugin)) {
-                continue;
-            }
-
-            $metadata = $plugin['metadata'] ?? [];
-
-            // Guarded with its own `continue` rather than folded into the
-            // ternary below. Everything here comes out of hand-edited YAML
-            // and is `mixed`, and narrowing once, explicitly, is the only
-            // shape that reads the same to every PHPStan in the supported
-            // range — the clever one-liner was accepted by the current
-            // version and rejected by the floor.
-            if (!is_array($metadata)) {
-                continue;
-            }
-
-            $named = $metadata['challenge_provider'] ?? null;
-
-            if (!is_string($named) || $named === '') {
-                continue;
-            }
-
-            $ruleName = $metadata['name'] ?? null;
-            $class = $plugin['plugin'] ?? null;
-
-            $offenders[] = sprintf(
-                '%s (metadata.challenge_provider: %s)',
-                match (true) {
-                    is_string($ruleName) => $ruleName,
-                    is_string($class) => $class,
-                    default => '?',
-                },
-                $named
-            );
-        }
-
-        if ($offenders === []) {
-            return;
-        }
-
-        throw new ConfigurationException(sprintf(
-            'kanopi/firewall-symfony cannot serve per-rule challenge providers, and refusing to start beats '
-            . 'locking a visitor out: %s. In `exception` mode the bundle renders the interstitial, and it has '
-            . 'no supported way to sign the `provider_token` field that tells the submission handler which '
-            . 'provider to verify against — so a solved challenge would be verified by `challenge.provider`, '
-            . 'the pass token would carry the wrong provider name, and the rule would challenge again forever. '
-            . 'Remove `metadata.challenge_provider` and let `challenge.provider` serve every rule. Tracked '
-            . 'upstream as kanopi/firewall#311: there is no public equivalent of '
-            . 'Firewall::signProviderName().',
-            implode(', ', $offenders)
-        ));
     }
 
     /**

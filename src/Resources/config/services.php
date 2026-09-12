@@ -13,7 +13,6 @@ namespace Symfony\Component\DependencyInjection\Loader\Configurator;
 
 use Composer\InstalledVersions;
 use Kanopi\Firewall\Utility\BlockList;
-use Kanopi\FirewallBundle\CacheWarmer\ChallengeConfigWarmer;
 use Kanopi\FirewallBundle\Command\BlockCommand;
 use Kanopi\FirewallBundle\Command\BlocksCommand;
 use Kanopi\FirewallBundle\Command\CheckCommand;
@@ -42,7 +41,6 @@ use Kanopi\FirewallBundle\Firewall\LoggerBridge;
 use Kanopi\FirewallBundle\Firewall\ProxyPosture;
 use Kanopi\FirewallBundle\Firewall\StatusReport;
 use Kanopi\FirewallBundle\Http\ChallengeConfigResolver;
-use Kanopi\FirewallBundle\Http\ChallengeRenderer;
 use Kanopi\FirewallBundle\Http\FirewallResponseFactory;
 
 // Every service the bundle registers.
@@ -111,15 +109,8 @@ return static function (ContainerConfigurator $containerConfigurator): void {
             param('kanopi_firewall.library_overrides'),
         ]);
 
-    $services->set('kanopi_firewall.challenge_renderer', ChallengeRenderer::class)
-        ->args([
-            service('kanopi_firewall.challenge_config_resolver'),
-            service('kanopi_firewall.decision_recorder'),
-        ]);
-
     $services->set('kanopi_firewall.response_factory', FirewallResponseFactory::class)
         ->args([
-            service('kanopi_firewall.challenge_renderer'),
             service('kanopi_firewall.challenge_config_resolver'),
             service('kanopi_firewall.decision_recorder'),
             param('kanopi_firewall.challenge.cookie'),
@@ -141,10 +132,6 @@ return static function (ContainerConfigurator $containerConfigurator): void {
             'method' => '__invoke',
             'priority' => '%kanopi_firewall.listener.priority%',
         ]);
-
-    $services->set('kanopi_firewall.challenge_config_warmer', ChallengeConfigWarmer::class)
-        ->args([service('kanopi_firewall.challenge_config_resolver')])
-        ->tag('kernel.cache_warmer');
 
     $services->set('kanopi_firewall.data_collector', FirewallDataCollector::class)
         ->args([

@@ -12,8 +12,11 @@ declare(strict_types=1);
 namespace Kanopi\FirewallBundle\Http;
 
 use Kanopi\Firewall\Event\ChallengeSolved;
+use Kanopi\Firewall\Exception\ChallengeRequiredException;
 use Kanopi\Firewall\Exception\ChallengeSolvedException;
 use Kanopi\Firewall\Exception\FirewallBlockedException;
+use Kanopi\Firewall\Exception\FirewallLockdownException;
+use Kanopi\Firewall\Exception\FirewallRedirectException;
 use Kanopi\FirewallBundle\EventListener\DecisionRecorder;
 use Symfony\Component\HttpFoundation\Cookie;
 use Symfony\Component\HttpFoundation\RedirectResponse;
@@ -36,8 +39,6 @@ final class FirewallResponseFactory
     private const DEFAULT_TTL = 3600;
 
     /**
-     * @param ChallengeRenderer $challengeRenderer
-     *   Builds the interstitial document.
      * @param ChallengeConfigResolver $resolver
      *   Supplies the pass-cookie name.
      * @param DecisionRecorder $decisionRecorder
@@ -49,7 +50,6 @@ final class FirewallResponseFactory
      *   the application's error controller.
      */
     public function __construct(
-        private readonly ChallengeRenderer $challengeRenderer,
         private readonly ChallengeConfigResolver $resolver,
         private readonly DecisionRecorder $decisionRecorder,
         private readonly array $cookieOptions,
@@ -68,6 +68,17 @@ final class FirewallResponseFactory
      * Sending this as `text/html` would leave the escaping as the only thing
      * between a blocked attacker and reflected XSS on the block page.
      *
+     * ## Lockdown carries `Retry-After`
+     *
+     * `FirewallLockdownException` is a refusal of everybody rather than of
+     * this visitor, and it is meant to be temporary. `Retry-After` is what
+     * says so to the one reader that matters during a lockdown: a CDN in
+     * front of the site, which will otherwise take a bare 503 for a
+     * permanent condition and keep serving it after the lockdown is lifted.
+     * The header is set even in `http_exception` mode, where the error
+     * controller renders the body but the headers are still the firewall's
+     * to state.
+     *
      * @throws HttpException
      *   In `http_exception` mode, so the application's error controller
      *   renders it. The message is dropped there: an error template is HTML
@@ -77,12 +88,7 @@ final class FirewallResponseFactory
     public function blocked(FirewallBlockedException $exception): Response
     {
         $status = $this->normalizeStatus($exception->getStatusCode());
-
-        if ($this->blockedResponse === 'http_exception') {
-            throw new HttpException($status, '', $exception);
-        }
-
-        return new Response($exception->getMessage(), $status, [
+        $headers = [
             'Content-Type' => 'text/plain; charset=utf-8',
             'X-Content-Type-Options' => 'nosniff',
             // A cached block page is a block that outlives the ban, served by
@@ -91,7 +97,20 @@ final class FirewallResponseFactory
             // explicit costs nothing and survives a shared cache configured
             // to store 4xx.
             'Cache-Control' => 'no-store, private',
-        ]);
+        ];
+
+        if ($exception instanceof FirewallLockdownException) {
+            $headers['Retry-After'] = (string) $exception->getRetryAfter();
+        }
+
+        if ($this->blockedResponse === 'http_exception') {
+            throw new HttpException($status, '', $exception, array_intersect_key(
+                $headers,
+                ['Retry-After' => true]
+            ));
+        }
+
+        return new Response($exception->getMessage(), $status, $headers);
     }
 
     /**
@@ -102,16 +121,60 @@ final class FirewallResponseFactory
      * 4xx here would have a CDN and a browser treat a solvable page as an
      * error, and `Firewall::sendChallengeResponse()` sends 200 for the same
      * reason.
+     *
+     * ## The exception renders itself, and that is the whole point
+     *
+     * This bundle used to build the document: stand up a provider registry
+     * from the same configuration, pick the provider, assemble the six
+     * render-context fields and ask it to render. It worked for the common
+     * case and could not work for one rule naming its own provider, because
+     * the field that makes such a solution verifiable — `provider_token` —
+     * is signed by a `protected` method behind a `private const` prefix on a
+     * `final` class. Rendering without it did not fail: the visitor solved
+     * the challenge, the pass token carried the wrong provider claim, the
+     * rule refused it, and they were served the same interstitial forever
+     * with nothing logged above `notice`.
+     *
+     * The bundle's answer was to refuse that configuration outright at
+     * `cache:clear`. The library's answer, from 2.26.0, is
+     * `ChallengeRequiredException::renderInterstitial()` — which holds the
+     * provider the firewall actually chose and the context it actually
+     * built, so there is nothing left here to get wrong. That is
+     * kanopi/firewall#311, reported from this package, and this one call is
+     * the whole of consuming the fix.
      */
-    public function challengeRequired(Request $request): Response
+    public function challengeRequired(ChallengeRequiredException $challengeRequiredException, Request $request): Response
     {
-        return new Response($this->challengeRenderer->render($request), Response::HTTP_OK, [
+        return new Response($challengeRequiredException->renderInterstitial($request), Response::HTTP_OK, [
             'Content-Type' => 'text/html; charset=utf-8',
             // Non-negotiable. The interstitial embeds per-visitor state — a
             // signed math answer, a widget nonce — and a cached copy served
             // to a second visitor is a challenge nobody can solve.
             'Cache-Control' => 'no-store',
         ]);
+    }
+
+    /**
+     * A visitor sent somewhere else rather than refused.
+     *
+     * `response: redirect` is a signpost, not a ban — a notice page, a
+     * contact form, a "your account is suspended" explanation. It records
+     * nothing by default, and it runs before the block bucket, so the
+     * gentlest terminal answer wins.
+     *
+     * `no-store` for the same reason a challenge carries it: the decision
+     * was made about this visitor, and a cached copy would send the next one
+     * to the same notice.
+     */
+    public function redirected(FirewallRedirectException $firewallRedirectException): Response
+    {
+        $response = new RedirectResponse(
+            $firewallRedirectException->getLocation(),
+            $this->normalizeRedirectStatus($firewallRedirectException->getStatusCode())
+        );
+        $response->headers->set('Cache-Control', 'no-store');
+
+        return $response;
     }
 
     /**
@@ -175,6 +238,26 @@ final class FirewallResponseFactory
         $ttl = $decision->getTtl();
 
         return $ttl > 0 ? $ttl : self::DEFAULT_TTL;
+    }
+
+    /**
+     * Keep a redirect's status inside the range that is *a redirect*.
+     *
+     * Narrower than `normalizeStatus()` and needs to be: `RedirectResponse`
+     * refuses anything outside 300-399 with an `InvalidArgumentException`,
+     * so the general fallback of 400 would turn a misconfigured
+     * `metadata.redirect_status` into a 500 thrown from inside the listener
+     * — the visitor refused with a stack trace instead of sent where the
+     * rule meant to send them.
+     *
+     * 302 rather than 301: a permanent redirect is cached by the browser
+     * against the URL, so a typo in a rule's status would outlive the rule
+     * and keep sending that visitor to the notice page after the rule was
+     * removed.
+     */
+    private function normalizeRedirectStatus(int $status): int
+    {
+        return $status >= 300 && $status <= 399 ? $status : Response::HTTP_FOUND;
     }
 
     /**

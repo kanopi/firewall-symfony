@@ -17,6 +17,9 @@ use Kanopi\Firewall\Event\DecisionEvent;
 use Kanopi\Firewall\Event\RequestAllowed;
 use Kanopi\Firewall\Event\RequestBlocked;
 use Kanopi\Firewall\Event\RequestChallenged;
+use Kanopi\Firewall\Event\RequestMarked;
+use Kanopi\Firewall\Event\RequestRecorded;
+use Kanopi\Firewall\Event\RequestRedirected;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 
 /**
@@ -66,6 +69,14 @@ final class DecisionRecorder implements EventSubscriberInterface
             RequestChallenged::class => 'record',
             ChallengeSolved::class => 'record',
             ChallengeFailed::class => 'record',
+            // The three 2.26.0 added. Subscribing to a fixed list rather
+            // than to `DecisionEvent` is what makes this a list that has to
+            // be kept up: a decision nobody subscribes to leaves the
+            // profiler reporting "not evaluated" for a request the firewall
+            // acted on, which is the one reading it must never give.
+            RequestRecorded::class => 'record',
+            RequestRedirected::class => 'record',
+            RequestMarked::class => 'record',
         ];
     }
 

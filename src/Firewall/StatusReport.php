@@ -107,6 +107,7 @@ final class StatusReport
                 'config_inputs' => $this->inputs(),
                 'config_load_errors' => $this->configSnapshot->loadErrors(),
                 'storage_type' => $this->configSnapshot->storageType(),
+                'lockdown' => $this->lockdown(),
             ],
             $this->storage(),
             [
@@ -115,6 +116,27 @@ final class StatusReport
                 'script_dir' => $this->binDir,
             ]
         );
+    }
+
+    /**
+     * Lockdown, in the words an operator needs mid-incident.
+     *
+     * Named rather than reported as a boolean beside a count, because the
+     * dangerous state is not "on" but "on with nobody allowed" — that
+     * refuses the operator reading this report as surely as it refuses
+     * everyone else.
+     */
+    private function lockdown(): string
+    {
+        $lockdown = $this->configSnapshot->lockdown();
+
+        if (!$lockdown['active']) {
+            return 'off';
+        }
+
+        return $lockdown['allowed'] === 0
+            ? 'ACTIVE, and lockdown_allow is empty — every request is refused'
+            : sprintf('ACTIVE, %d allowed range(s)', $lockdown['allowed']);
     }
 
     /**

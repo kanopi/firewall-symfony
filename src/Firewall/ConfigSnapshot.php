@@ -184,6 +184,36 @@ final class ConfigSnapshot
     }
 
     /**
+     * Is the firewall configured to refuse everybody?
+     *
+     * `global.lockdown` is a flag rather than a mode — the modes are the
+     * delivery axis (exit, throw, log) and this is a policy one — so it is
+     * invisible in every field that reports a mode, and a deployment can sit
+     * in lockdown looking perfectly ordinary. Which is the failure worth
+     * catching: lockdown is meant to be temporary, and the realistic mistake
+     * is nobody noticing it is still on.
+     *
+     * @return array{active: bool, allowed: int}
+     *   Whether it is on, and how many entries the allowlist has. An empty
+     *   allowlist with lockdown on refuses everyone including the operator,
+     *   which the library's own doctor reports as an error.
+     */
+    public function lockdown(): array
+    {
+        $global = $this->all()['global'] ?? null;
+        $global = is_array($global) ? $global : [];
+        $allowed = $global['lockdown_allow'] ?? null;
+
+        return [
+            // `mode: lockdown` is documented shorthand for the flag, so a
+            // report reading only the flag would say "off" for a firewall
+            // that is refusing every request.
+            'active' => ($global['lockdown'] ?? false) === true || ($global['mode'] ?? null) === 'lockdown',
+            'allowed' => is_array($allowed) ? count($allowed) : 0,
+        ];
+    }
+
+    /**
      * The configured storage class, or an empty string when none is set.
      */
     public function storageType(): string

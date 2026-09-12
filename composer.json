@@ -33,7 +33,7 @@
         }
     },
     "require": {
-        "kanopi/firewall": "^2.24",
+        "kanopi/firewall": "^2.26",
         "monolog/monolog": "^3.9",
         "php": ">=8.1",
         "psr/log": "^3.0",

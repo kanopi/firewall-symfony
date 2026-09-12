@@ -1,0 +1,22 @@
+# One path is sent somewhere else rather than refused.
+#
+# `response: redirect` is terminal like a block and gentler: a signpost to a
+# notice page, a contact form, an explanation. It records nothing, so a
+# visitor sent to the notice does not come back to find themselves banned.
+global:
+  behind_proxy: false
+storage:
+  type: Kanopi\Firewall\Storage\InMemoryStorage
+logger:
+  handlers:
+    - class: Monolog\Handler\NullHandler
+plugins:
+  - plugin: "Kanopi\\Firewall\\Plugins\\Url"
+    response: redirect
+    enable: true
+    metadata:
+      name: test-redirect-url
+      redirect_to: /notice
+      redirect_status: 307
+    config:
+      - path:/moved

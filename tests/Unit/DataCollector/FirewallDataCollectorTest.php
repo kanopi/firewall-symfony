@@ -17,6 +17,9 @@ use Kanopi\Firewall\Event\DecisionEvent;
 use Kanopi\Firewall\Event\RequestAllowed;
 use Kanopi\Firewall\Event\RequestBlocked;
 use Kanopi\Firewall\Event\RequestChallenged;
+use Kanopi\Firewall\Event\RequestMarked;
+use Kanopi\Firewall\Event\RequestRecorded;
+use Kanopi\Firewall\Event\RequestRedirected;
 use Kanopi\Firewall\Plugins\PluginInterface;
 use Kanopi\FirewallBundle\DataCollector\FirewallDataCollector;
 use Kanopi\FirewallBundle\EventListener\DecisionRecorder;
@@ -73,6 +76,12 @@ final class FirewallDataCollectorTest extends TestCase
         yield 'challenge' => [new RequestChallenged($request, $plugin, 'math'), 'challenged'];
         yield 'challenge solved' => [new ChallengeSolved($request, 'math', 60), 'challenge solved'];
         yield 'challenge failed' => [new ChallengeFailed($request, 'math', 'invalid_solution'), 'challenge failed'];
+        // The three kanopi/firewall 2.26.0 added. Each is a request the
+        // firewall acted on without refusing it, and each would read as
+        // "allowed" — or worse, "not evaluated" — without its own word.
+        yield 'recorded' => [new RequestRecorded($request, $plugin, true), 'recorded'];
+        yield 'redirected' => [new RequestRedirected($request, $plugin, '/notice', 307), 'redirected'];
+        yield 'marked' => [new RequestMarked($request, $plugin, 'needs-captcha', 'firewall.marks'), 'marked'];
     }
 
     public function testABlockNamesTheRuleAndTheStatus(): void
@@ -87,6 +96,47 @@ final class FirewallDataCollectorTest extends TestCase
         self::assertSame(['name' => 'stub-rule', 'class' => StubPlugin::class], $data['rule']);
         self::assertSame(429, $data['status_code']);
         self::assertTrue($data['enforced']);
+    }
+
+    public function testARedirectSaysWhereTheVisitorWasSent(): void
+    {
+        // "redirected" on its own leaves an operator to guess where to, and
+        // the destination is the whole content of the decision.
+        $recorder = new DecisionRecorder();
+        $recorder->record(new RequestRedirected(Request::create('/moved'), new StubPlugin(), '/notice', 307));
+
+        $data = $this->collect($recorder);
+
+        self::assertSame('/notice', $data['location']);
+        self::assertSame(307, $data['status_code'], 'the status it answered with, like a block\'s');
+        self::assertSame(['name' => 'stub-rule', 'class' => StubPlugin::class], $data['rule']);
+    }
+
+    public function testAMarkSaysWhatItMarked(): void
+    {
+        // Nothing was refused and nothing was written, so the mark is the
+        // panel's only trace that a rule matched at all.
+        $recorder = new DecisionRecorder();
+        $recorder->record(new RequestMarked(Request::create('/'), new StubPlugin(), 'needs-captcha', 'firewall.marks'));
+
+        $data = $this->collect($recorder);
+
+        self::assertSame('needs-captcha', $data['mark']);
+        self::assertNull($data['status_code'], 'nothing was answered with a status');
+        self::assertSame(['name' => 'stub-rule', 'class' => StubPlugin::class], $data['rule']);
+    }
+
+    public function testARecordedRequestNamesTheRuleThatWillRefuseTheNextOne(): void
+    {
+        $recorder = new DecisionRecorder();
+        $recorder->record(new RequestRecorded(Request::create('/.env'), new StubPlugin(), true));
+
+        $data = $this->collect($recorder);
+
+        self::assertSame('recorded', $data['verdict']);
+        self::assertSame(['name' => 'stub-rule', 'class' => StubPlugin::class], $data['rule']);
+        self::assertNull($data['location']);
+        self::assertNull($data['mark']);
     }
 
     public function testADurableBlockListHitNamesNoRule(): void

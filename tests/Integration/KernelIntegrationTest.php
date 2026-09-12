@@ -436,17 +436,32 @@ final class KernelIntegrationTest extends TestCase
         );
     }
 
-    public function testCacheWarmupRefusesPerRuleChallengeProviders(): void
+    public function testARuleServesItsOwnChallengeProvider(): void
     {
+        // Until kanopi/firewall 2.26.0 this configuration was refused at
+        // `cache:clear` and this test asserted the refusal. The bundle
+        // rendered the interstitial itself and had no way to sign the
+        // `provider_token` that tells the submission handler which provider
+        // to verify against, so a visitor who solved the challenge was
+        // challenged again, forever, with nothing above `notice` in the log.
+        // That was kanopi/firewall#311, reported from this package.
+        //
+        // `ChallengeRequiredException` now carries the provider and the
+        // signed context, so the whole wiring works — and a test that boots,
+        // serves the interstitial and finds the field in it is the only way
+        // to know the signing half is actually reaching the visitor.
         $kernel = $this->boot(['config_files' => [self::CONFIG . 'per-rule-provider.yml']]);
 
-        $this->expectException(\Kanopi\Firewall\Exception\ConfigurationException::class);
-        $this->expectExceptionMessageMatches('/gated-by-recaptcha/');
+        $response = $kernel->handle($this->request('/gated'));
+        $content = (string) $response->getContent();
 
-        // Warmers run while the container is being built, so this fires
-        // during `cache:clear` on a deploy — which is the entire point of
-        // putting the check in one.
-        $kernel->boot();
+        self::assertSame(200, $response->getStatusCode(), 'an interstitial is a question, not a refusal');
+        self::assertStringContainsString('name="challenge_provider"', $content, 'the signed provider field');
+        self::assertStringContainsString(
+            'altcha',
+            $content,
+            'served by the provider the rule named, not by challenge.provider'
+        );
     }
 
     /**

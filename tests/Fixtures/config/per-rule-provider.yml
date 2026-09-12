@@ -1,8 +1,23 @@
-# The one wiring the bundle refuses: a rule naming its own provider.
+# A rule that names its own challenge provider.
+#
+# The wiring the bundle refused to start on until kanopi/firewall 2.26.0:
+# the interstitial such a rule needs carries a signed `provider_token`, and
+# nothing public could sign it, so a visitor who solved the challenge was
+# challenged again forever. `ChallengeRequiredException::renderInterstitial()`
+# now produces it, so this is supported — and this fixture proves it rather
+# than proving the refusal.
+#
+# `altcha` and not `turnstile` or `recaptcha` for the per-rule provider:
+# those two require a `site_key` and a `secret_key` to construct at all, so a
+# fixture using one would be testing provider configuration rather than
+# per-rule provider selection.
 global:
   behind_proxy: false
 storage:
   type: Kanopi\Firewall\Storage\InMemoryStorage
+logger:
+  handlers:
+    - class: Monolog\Handler\NullHandler
 challenge:
   provider: math
   secret: 'test-secret-not-for-production-use'
@@ -11,7 +26,7 @@ plugins:
     response: challenge
     enable: true
     metadata:
-      name: gated-by-recaptcha
-      challenge_provider: recaptcha
+      name: gated-by-altcha
+      challenge_provider: altcha
     config:
       - path:/gated

@@ -145,6 +145,34 @@ final class ConfigSnapshotTest extends TestCase
         self::assertSame(0, $snapshot->rules()[0]['weight']);
     }
 
+    public function testLockdownIsReportedBecauseNoModeFieldShowsIt(): void
+    {
+        // A flag, not a mode, so every field that reports a mode says
+        // "exception" while the site refuses everybody.
+        $snapshot = new ConfigSnapshot([[
+            'global' => ['lockdown' => true, 'lockdown_allow' => ['198.51.100.0/24', '203.0.113.0/24']],
+        ]], []);
+
+        self::assertSame(['active' => true, 'allowed' => 2], $snapshot->lockdown());
+    }
+
+    public function testLockdownAsAModeIsStillLockdown(): void
+    {
+        // `mode: lockdown` is documented shorthand for the flag, including
+        // from a panic file — reading only the flag would report "off" for a
+        // firewall refusing every request.
+        $snapshot = new ConfigSnapshot([['global' => ['mode' => 'lockdown']]], []);
+
+        self::assertSame(['active' => true, 'allowed' => 0], $snapshot->lockdown());
+    }
+
+    public function testNoLockdownIsTheOrdinaryCase(): void
+    {
+        $snapshot = new ConfigSnapshot([['global' => ['mode' => 'exception']]], []);
+
+        self::assertSame(['active' => false, 'allowed' => 0], $snapshot->lockdown());
+    }
+
     public function testAnInputThatFailedToLoadIsReportedRatherThanIgnored(): void
     {
         // The quietest failure in the system: loading is lenient, so an
