@@ -18,12 +18,12 @@ use Kanopi\FirewallBundle\Firewall\FirewallFactory;
 use Kanopi\FirewallBundle\Firewall\LoggerBridge;
 use Kanopi\FirewallBundle\Firewall\ProxyPosture;
 use Kanopi\FirewallBundle\Http\ChallengeConfigResolver;
-use Kanopi\FirewallBundle\Http\ChallengeRenderer;
 use Kanopi\FirewallBundle\Http\FirewallResponseFactory;
 use Kanopi\FirewallBundle\Tests\Fixtures\MathChallengeSolver;
 use Kanopi\FirewallBundle\Tests\Fixtures\RecordingLogger;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
+use Symfony\Component\HttpFoundation\RedirectResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpKernel\Event\RequestEvent;
@@ -44,6 +44,23 @@ final class FirewallRequestListenerTest extends TestCase
         $event = $this->handle('/', '203.0.113.5', 'broken-storage.yml', mode: 'disabled');
 
         self::assertNull($event->getResponse());
+    }
+
+    public function testARedirectRuleSendsTheVisitorInsteadOfRefusingThem(): void
+    {
+        // `response: redirect` arrived in kanopi/firewall 2.26.0 and is
+        // thrown from `evaluate()` like a block — but the library does not
+        // declare it in `@throws`, so a host following the documented
+        // contract never writes the catch and the visitor gets a 500 where
+        // the rule meant to send them somewhere. This test is what stands
+        // between that and a release.
+        $event = $this->handle('/moved', '203.0.113.9', 'redirect.yml');
+
+        $response = $event->getResponse();
+
+        self::assertInstanceOf(RedirectResponse::class, $response);
+        self::assertSame(307, $response->getStatusCode());
+        self::assertSame('/notice', $response->headers->get('Location'));
     }
 
     public function testSubRequestsAreSkipped(): void
@@ -296,7 +313,6 @@ final class FirewallRequestListenerTest extends TestCase
                 $dispatcher
             ),
             new FirewallResponseFactory(
-                new ChallengeRenderer($resolver, $recorder),
                 $resolver,
                 $recorder,
                 ['path' => '/', 'domain' => null, 'secure' => true, 'http_only' => true, 'same_site' => 'strict']

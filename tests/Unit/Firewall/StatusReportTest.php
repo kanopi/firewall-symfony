@@ -95,6 +95,44 @@ final class StatusReportTest extends TestCase
         self::assertStringContainsString('missing.yml', $this->text($report, 'config_load_errors', 0));
     }
 
+    public function testLockdownWithAnEmptyAllowlistSaysWhatThatMeans(): void
+    {
+        // The dangerous state is not "on", it is "on with nobody allowed" —
+        // which refuses the operator reading this report too.
+        $configs = [[
+            'global' => ['behind_proxy' => false, 'lockdown' => true],
+            'storage' => ['type' => InMemoryStorage::class],
+            'logger' => ['handlers' => [['class' => 'Monolog\\Handler\\NullHandler']]],
+            'plugins' => [['plugin' => 'Kanopi\\Firewall\\Plugins\\IpAddress', 'config' => ['203.0.113.5']]],
+        ]];
+
+        self::assertSame(
+            'ACTIVE, and lockdown_allow is empty — every request is refused',
+            $this->report($configs)->toArray()['lockdown']
+        );
+    }
+
+    public function testLockdownWithAnAllowlistCountsIt(): void
+    {
+        $configs = [[
+            'global' => [
+                'behind_proxy' => false,
+                'lockdown' => true,
+                'lockdown_allow' => ['198.51.100.0/24'],
+            ],
+            'storage' => ['type' => InMemoryStorage::class],
+            'logger' => ['handlers' => [['class' => 'Monolog\\Handler\\NullHandler']]],
+            'plugins' => [['plugin' => 'Kanopi\\Firewall\\Plugins\\IpAddress', 'config' => ['203.0.113.5']]],
+        ]];
+
+        self::assertSame('ACTIVE, 1 allowed range(s)', $this->report($configs)->toArray()['lockdown']);
+    }
+
+    public function testNoLockdownIsReportedAsOff(): void
+    {
+        self::assertSame('off', $this->report([self::CONFIG . 'block.yml'])->toArray()['lockdown']);
+    }
+
     public function testTheStorageBackendIsAskedRatherThanInferredFromConfiguration(): void
     {
         // `storage_type` is what was configured; `storage_backend` is what

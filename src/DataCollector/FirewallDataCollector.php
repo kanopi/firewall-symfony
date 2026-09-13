@@ -17,6 +17,9 @@ use Kanopi\Firewall\Event\DecisionEvent;
 use Kanopi\Firewall\Event\RequestAllowed;
 use Kanopi\Firewall\Event\RequestBlocked;
 use Kanopi\Firewall\Event\RequestChallenged;
+use Kanopi\Firewall\Event\RequestMarked;
+use Kanopi\Firewall\Event\RequestRecorded;
+use Kanopi\Firewall\Event\RequestRedirected;
 use Kanopi\Firewall\Firewall;
 use Kanopi\FirewallBundle\EventListener\DecisionRecorder;
 use Kanopi\FirewallBundle\Firewall\FirewallFactory;
@@ -78,7 +81,13 @@ final class FirewallDataCollector extends DataCollector
             'verdict' => $this->verdict($decision),
             'enforced' => $decision instanceof DecisionEvent ? $decision->isEnforced() : null,
             'rule' => $this->rule($decision),
-            'status_code' => $decision instanceof RequestBlocked ? $decision->getStatusCode() : null,
+            'status_code' => $this->statusCode($decision),
+            // Where a redirected visitor was sent, and what a marked request
+            // was marked with. Both are the whole content of their decision:
+            // without them the panel would say "redirected" and leave an
+            // operator to guess where to.
+            'location' => $decision instanceof RequestRedirected ? $decision->getLocation() : null,
+            'mark' => $decision instanceof RequestMarked ? $decision->getMark() : null,
             'provider' => $this->provider($decision),
             'reason' => $decision instanceof ChallengeFailed ? $decision->getReason() : null,
             'mode' => null,
@@ -172,6 +181,18 @@ final class FirewallDataCollector extends DataCollector
     }
 
     /**
+     * The status a decision answered with, where it answered with one.
+     */
+    private function statusCode(?DecisionEvent $decision): ?int
+    {
+        return match (true) {
+            $decision instanceof RequestBlocked => $decision->getStatusCode(),
+            $decision instanceof RequestRedirected => $decision->getStatusCode(),
+            default => null,
+        };
+    }
+
+    /**
      * A one-word verdict for the toolbar.
      */
     private function verdict(?DecisionEvent $decision): string
@@ -181,6 +202,15 @@ final class FirewallDataCollector extends DataCollector
             $decision instanceof RequestChallenged => 'challenged',
             $decision instanceof ChallengeSolved => 'challenge solved',
             $decision instanceof ChallengeFailed => 'challenge failed',
+            // Served, and the *next* request from this client is refused.
+            // Worth its own word rather than "allowed": the request went
+            // through, and something durable happened because of it.
+            $decision instanceof RequestRecorded => 'recorded',
+            $decision instanceof RequestRedirected => 'redirected',
+            // Nothing was refused and nothing was written. The request
+            // carries a mark the application may act on, which is the panel's
+            // only trace that a rule matched at all.
+            $decision instanceof RequestMarked => 'marked',
             $decision instanceof RequestAllowed => $decision->wasBypassed() ? 'bypassed' : 'allowed',
             default => 'not evaluated',
         };
@@ -198,6 +228,8 @@ final class FirewallDataCollector extends DataCollector
         $plugin = match (true) {
             $decision instanceof RequestBlocked, $decision instanceof RequestAllowed => $decision->getPlugin(),
             $decision instanceof RequestChallenged => $decision->getPlugin(),
+            $decision instanceof RequestRecorded, $decision instanceof RequestRedirected => $decision->getPlugin(),
+            $decision instanceof RequestMarked => $decision->getPlugin(),
             default => null,
         };
 

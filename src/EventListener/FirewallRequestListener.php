@@ -14,6 +14,8 @@ namespace Kanopi\FirewallBundle\EventListener;
 use Kanopi\Firewall\Exception\ChallengeRequiredException;
 use Kanopi\Firewall\Exception\ChallengeSolvedException;
 use Kanopi\Firewall\Exception\FirewallBlockedException;
+use Kanopi\Firewall\Exception\FirewallException;
+use Kanopi\Firewall\Exception\FirewallRedirectException;
 use Kanopi\Firewall\Firewall;
 use Kanopi\FirewallBundle\Firewall\FirewallFactory;
 use Kanopi\FirewallBundle\Http\FirewallResponseFactory;
@@ -152,25 +154,57 @@ final class FirewallRequestListener
 
         try {
             $firewall->evaluate($request);
-        } catch (ChallengeSolvedException $challengeSolvedException) {
-            // First, because it is the narrowest and the only one carrying a
-            // token. Ordering matters to a reader more than to PHP here —
-            // the three are siblings, not a hierarchy.
-            $requestEvent->setResponse($this->responseFactory->challengeSolved($challengeSolvedException));
-        } catch (ChallengeRequiredException) {
-            // The exception deliberately does not say whether this is a first
-            // challenge or a rejected answer — telling a bot which would be
-            // free information — so the same interstitial serves both.
-            $requestEvent->setResponse($this->responseFactory->challengeRequired($request));
-        } catch (FirewallBlockedException $firewallBlockedException) {
-            $requestEvent->setResponse($this->responseFactory->blocked($firewallBlockedException));
+        } catch (FirewallException $firewallException) {
+            // ## Why one catch and a match, rather than four catches
+            //
+            // Four catches is the shape this wants, and it was the shape it
+            // had. `Firewall::evaluate()` does not declare
+            // `@throws FirewallRedirectException` — it throws it, from
+            // `sendRedirectResponse()`, but the docblock 2.26.0 shipped lists
+            // only blocked, challenged, solved and configuration. A static
+            // analyser reading that contract calls
+            // `catch (FirewallRedirectException)` dead code, and it is right
+            // to: a host following the documented contract would never write
+            // one, and a `response: redirect` rule in `mode: exception` would
+            // then reach the kernel uncaught and serve a 500 instead of a
+            // redirect. Reported upstream.
+            //
+            // Catching the base and dispatching on type says the same thing
+            // without depending on that list being complete, which for a
+            // listener standing between the library and every request is the
+            // more robust place to be anyway.
+            $requestEvent->setResponse(match (true) {
+                // First, because it is the narrowest and the only one
+                // carrying a token.
+                $firewallException instanceof ChallengeSolvedException
+                    => $this->responseFactory->challengeSolved($firewallException),
+                // The exception deliberately does not say whether this is a
+                // first challenge or a rejected answer — telling a bot which
+                // would be free information — so the same interstitial serves
+                // both. It also carries the provider the firewall chose and
+                // the context it built, which is what makes a rule with its
+                // own `metadata.challenge_provider` renderable here at all.
+                $firewallException instanceof ChallengeRequiredException
+                    => $this->responseFactory->challengeRequired($firewallException, $request),
+                // Terminal and gentler than a refusal: `response: redirect`
+                // is a signpost, and the library evaluates it before the
+                // block bucket for that reason.
+                $firewallException instanceof FirewallRedirectException
+                    => $this->responseFactory->redirected($firewallException),
+                // `FirewallLockdownException` arrives here too — it extends
+                // this one, and the response factory is where the difference
+                // (a `Retry-After`) is expressed.
+                $firewallException instanceof FirewallBlockedException
+                    => $this->responseFactory->blocked($firewallException),
+                // Rethrown, which is the same outcome the four catches gave:
+                // ConfigurationException and StorageException both mean
+                // something an operator configured is not working, and a 500
+                // that stops the deploy is the right answer. Swallowing them
+                // here would serve unfiltered traffic under a policy named
+                // `on_startup_failure`, which this is not.
+                default => throw $firewallException,
+            });
         }
-
-        // ConfigurationException and StorageException are deliberately not
-        // caught. Both mean something an operator configured is not working,
-        // and a 500 that stops the deploy is the right outcome; swallowing
-        // them here would serve unfiltered traffic under a policy named
-        // `on_startup_failure`, which this is not.
     }
 
     /**

@@ -253,44 +253,80 @@ controller renders the status with your own templates. The banning message is dr
 an error template is HTML by definition — though the original exception is chained as
 `previous`, so it still reaches your logger.
 
+## What a matched rule can do
+
+Six answers, and the bundle turns each into a response. The first three are the library's
+originals; `record`, `redirect` and `mark` arrived in kanopi/firewall 2.26.0, which is why
+this bundle requires `^2.26`.
+
+| `response:` | Refuses this request | Writes to the block list | The bundle returns |
+|---|---|---|---|
+| `allow` | — | — | nothing; the request continues |
+| `block` | ✅ | ✅ | `getStatusCode()`, the banning message, `no-store` |
+| `challenge` | — | — | 200 and the interstitial |
+| `record` | — | ✅ | nothing; the **next** request from that client is refused |
+| `redirect` | terminal | — | 302–307 to the rule's destination, `no-store` |
+| `mark` | — | — | nothing; the request carries a mark for your code |
+
+`record` is what a honeypot needs: refusing the fetch of `/.env` tells a scanner exactly
+which URL is wired. `redirect` is a signpost rather than a ban — a notice page, a contact
+form — and runs before the block bucket, so the gentlest terminal answer wins. `mark`
+turns the firewall into a signal source:
+
+```php
+if (in_array('needs-captcha', $request->attributes->get('firewall.marks', []), true)) {
+    // Show the CAPTCHA to this visitor, not to everybody.
+}
+```
+
+All six show up in the profiler panel with their own verdict, and a redirect names its
+destination there — "redirected" without one tells an operator nothing.
+
+**Lockdown** (`global.lockdown`) refuses everybody but `lockdown_allow`, records nobody,
+and answers 503 with `Retry-After` — which the bundle sets on the response, because a CDN
+in front of the site otherwise takes a bare 503 for a permanent condition and keeps serving
+the refusal after the lockdown is lifted. It is a flag rather than a mode, so nothing that
+reports a mode will show it: `bin/console kanopi:firewall:status` reports it on its own
+line, and says so loudly when the allowlist is empty.
+
 ## The challenge flow
 
 In `exception` mode the library throws instead of rendering, so the bundle owns the HTTP
-side of the round trip. It does not reimplement anything: it stands up a
-`ChallengeProviderRegistry` from the same configuration and asks the same provider for the
-same document, so the markup, the submit JavaScript and the field names are what `block`
-mode would have served.
+side of the round trip — but not the document. `ChallengeRequiredException` carries the
+provider the firewall resolved and the render context it built, so the interstitial is the
+library's own, byte for byte, including the signed `provider_token`.
 
 | The library throws | The bundle returns |
 |---|---|
-| `ChallengeRequiredException` | 200, the interstitial, `Cache-Control: no-store` |
+| `ChallengeRequiredException` | 200, `$e->renderInterstitial($request)`, `Cache-Control: no-store` |
 | `ChallengeSolvedException` | 303 to `getRedirect()`, with the pass cookie |
+| `FirewallRedirectException` | 302–307 to `getLocation()`, `Cache-Control: no-store` |
 | `FirewallBlockedException` | `getStatusCode()`, the banning message |
+| `FirewallLockdownException` | the same, plus `Retry-After` |
 
 303 rather than 302, because the visitor got here by POSTing a solution and a client that
 repeats the POST re-submits one a single-use provider has already burned. The pass cookie
 expires with the token it carries — the TTL is read off the `ChallengeSolved` event, which
 the library announces immediately before it throws.
 
-### Per-rule challenge providers are not supported
+### Per-rule challenge providers
 
-`metadata.challenge_provider` lets a single rule name its own provider. **The bundle
-refuses to start when any rule does**, and the refusal fires during `cache:clear`, so it
-lands at deploy rather than on a visitor.
+`metadata.challenge_provider` lets a single rule name its own provider — a cheap math
+question for a broad heuristic, reCAPTCHA for a login brute-force rule — and it works.
 
-The reason is a lockout, not an inconvenience. When rules use different providers, the
-interstitial has to carry a *signed* `provider_token` back so the submission is verified by
-the right one, and that signature is `Firewall::signProviderName()` — `protected`, over a
-`private const`, with no public equivalent. Rendering without it means the solution is
-verified by `challenge.provider`, the minted token carries that provider's name, the rule
-that named a different one rejects it, and the visitor is served the same interstitial
-forever with nothing in the logs calling it an error.
+It did not, until kanopi/firewall 2.26.0, and the history is worth one paragraph because
+the failure was silent. The bundle used to build the interstitial itself and had no
+supported way to sign the `provider_token` that tells the submission handler which provider
+to verify against: the prefix was a `private const`, the signer `protected`, the class
+`final`. Rendering without it was not a degraded experience but a permanent lockout — the
+solution was verified by `challenge.provider`, the pass token carried the wrong name, the
+rule rejected it, and the visitor was served the same interstitial forever with nothing
+logged above `notice`. This bundle refused to start rather than do that, and reported it as
+[kanopi/firewall#311](https://github.com/kanopi/firewall/issues/311).
 
-Reproducing the signature was the alternative. It lost because if the library ever changes
-that private constant, the field fails its signature check and we are back at the same
-silent lockout — with a green test suite. Use one `challenge.provider` for every rule until
-[kanopi/firewall#311](https://github.com/kanopi/firewall/issues/311) exposes a public way
-to sign it.
+The library's answer was to put the provider and the signed context on the exception. So
+the refusal, the bundle's own renderer and the cache warmer that raised the refusal at
+`cache:clear` are all gone, and the whole of consuming the fix is one call.
 
 ## Console commands
 
@@ -554,7 +590,7 @@ degrade to a sensible default when nothing was recorded.
 
 ## Requirements
 
-PHP 8.1–8.5 and `kanopi/firewall ^2.24`, which is what fixes the Symfony range:
+PHP 8.1–8.5 and `kanopi/firewall ^2.26`, which is what brings the response actions above and the challenge fix below:
 
 | Symfony | Supported | Tested in CI | Notes |
 |---|---|---|---|

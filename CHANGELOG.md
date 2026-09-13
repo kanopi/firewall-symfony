@@ -53,8 +53,31 @@ All notable changes to this project are documented here. The format follows
   this package could get wrong across that axis was invisible until something else ran it.
   It found two failures on its first full pass, both below.
 
+- Support for everything kanopi/firewall 2.26.0 added. `response: redirect` becomes a
+  redirect response — the library throws `FirewallRedirectException` from `evaluate()` and
+  does not declare it in `@throws`, so a host following the documented contract serves a
+  500 where the rule meant to send somebody to a notice page. `response: record` and
+  `response: mark` reach the profiler panel with their own verdicts, a marked request
+  naming its mark and a redirected one its destination. Lockdown answers carry
+  `Retry-After`, which is the header that stops a CDN treating a 503 as permanent and
+  serving the refusal after the lockdown is lifted, and `kanopi:firewall:status` reports
+  lockdown on its own line — it is a flag rather than a mode, so nothing that reports a
+  mode shows it.
+
 ### Changed
 
+- **Per-rule challenge providers are supported, and the refusal that stood in for them is
+  gone.** `metadata.challenge_provider` used to make this bundle refuse to start at
+  `cache:clear`: it rendered the interstitial itself and could not sign the
+  `provider_token` that tells the submission handler which provider to verify against, so
+  the alternative to refusing was a visitor solving a challenge, being rejected by the rule
+  that set it, and being served the same page forever with nothing logged above `notice`.
+  Reported as [kanopi/firewall#311](https://github.com/kanopi/firewall/issues/311), fixed
+  in 2.26.0 by putting the provider and the signed render context on
+  `ChallengeRequiredException`. Consuming it is one call, so `ChallengeRenderer`,
+  `ChallengeConfigWarmer` and the refusal itself are all deleted — about 260 lines of
+  workaround for one line of library.
+- `kanopi/firewall` requires `^2.26`, up from `^2.24`.
 - `kanopi:firewall:block` is now the command that blocks one address, and the wrapper
   around `bin/firewall-block` — which lists, finds, shows and lifts — is
   `kanopi:firewall:blocks`. The singular and the plural do opposite things, and overloading

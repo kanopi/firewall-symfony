@@ -13,6 +13,8 @@ namespace Kanopi\FirewallBundle\Tests\Integration;
 
 use Kanopi\Firewall\Event\ChallengeFailed;
 use Kanopi\Firewall\Event\RequestBlocked;
+use Kanopi\Firewall\Event\RequestMarked;
+use Kanopi\Firewall\Event\RequestRedirected;
 use Kanopi\FirewallBundle\DataCollector\FirewallDataCollector;
 use Kanopi\FirewallBundle\EventListener\DecisionRecorder;
 use Kanopi\FirewallBundle\Firewall\FirewallFactory;
@@ -72,6 +74,28 @@ final class ProfilerTemplateTest extends TestCase
         $recorder->record(new RequestBlocked(Request::create('/'), new StubPlugin(), 403, false));
 
         self::assertStringContainsString('recorded, not applied', $this->render($this->collect($recorder)));
+    }
+
+    public function testARedirectedRequestShowsWhereItWentAndAMarkedOneShowsItsMark(): void
+    {
+        // A redirect with no destination and a mark with no name each say
+        // nothing at all — the value *is* the decision in both cases.
+        $recorder = new DecisionRecorder();
+        $recorder->record(new RequestRedirected(Request::create('/moved'), new StubPlugin(), '/notice', 307));
+
+        $html = $this->render($this->collect($recorder));
+
+        self::assertStringContainsString('redirected', $html);
+        self::assertStringContainsString('Redirected to', $html);
+        self::assertStringContainsString('/notice', $html);
+
+        $recorder = new DecisionRecorder();
+        $recorder->record(new RequestMarked(Request::create('/'), new StubPlugin(), 'needs-captcha', 'firewall.marks'));
+
+        $html = $this->render($this->collect($recorder));
+
+        self::assertStringContainsString('marked', $html);
+        self::assertStringContainsString('needs-captcha', $html);
     }
 
     public function testARefusedSolutionShowsItsReason(): void

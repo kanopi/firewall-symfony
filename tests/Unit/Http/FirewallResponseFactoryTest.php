@@ -12,12 +12,15 @@ declare(strict_types=1);
 namespace Kanopi\FirewallBundle\Tests\Unit\Http;
 
 use Kanopi\Firewall\Event\ChallengeSolved;
+use Kanopi\Firewall\Firewall;
 use Kanopi\Firewall\Event\RequestAllowed;
+use Kanopi\Firewall\Exception\ChallengeRequiredException;
 use Kanopi\Firewall\Exception\ChallengeSolvedException;
+use Kanopi\Firewall\Exception\FirewallLockdownException;
+use Kanopi\Firewall\Exception\FirewallRedirectException;
 use Kanopi\Firewall\Exception\FirewallBlockedException;
 use Kanopi\FirewallBundle\EventListener\DecisionRecorder;
 use Kanopi\FirewallBundle\Http\ChallengeConfigResolver;
-use Kanopi\FirewallBundle\Http\ChallengeRenderer;
 use Kanopi\FirewallBundle\Http\FirewallResponseFactory;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -103,7 +106,8 @@ final class FirewallResponseFactoryTest extends TestCase
 
     public function testTheInterstitialIsServedAsAnUncacheableTwoHundred(): void
     {
-        $response = $this->factory()->challengeRequired(Request::create('/gated'));
+        $request = Request::create('/gated');
+        $response = $this->factory()->challengeRequired($this->challenge($request), $request);
 
         // 200 because the visitor is being asked a question, not refused —
         // a 4xx would have a CDN and a browser treat a solvable page as an
@@ -112,6 +116,79 @@ final class FirewallResponseFactoryTest extends TestCase
         self::assertSame('text/html; charset=utf-8', $response->headers->get('Content-Type'));
         self::assertStringContainsString('no-store', (string) $response->headers->get('Cache-Control'));
         self::assertStringContainsString('challenge_answer', (string) $response->getContent());
+    }
+
+    public function testARuleWithItsOwnProviderRendersWithASignedProviderToken(): void
+    {
+        // The lockout this package reported as kanopi/firewall#311, now the
+        // other way round. The default provider is `math` and the rule names
+        // `altcha`, so the interstitial has to say which one served it — and
+        // that field is signed by the library, which is the only thing that
+        // can sign it.
+        $request = Request::create('/gated');
+
+        $content = (string) $this->factory()
+            ->challengeRequired($this->challenge($request, 'per-rule-provider.yml'), $request)
+            ->getContent();
+
+        // The field is named for the interface constant and carries the
+        // signed value; `provider_token` is the context key, not the markup.
+        self::assertStringContainsString('name="challenge_provider"', $content);
+        self::assertStringContainsString('altcha', $content, 'the rule\'s provider served it, not the default');
+    }
+
+    public function testARedirectedVisitorIsSentOnUncacheably(): void
+    {
+        // `response: redirect` is a signpost and not a ban, and a cached
+        // copy would send the next visitor to the same notice.
+        $response = $this->factory()->redirected(new FirewallRedirectException('/notice', 302));
+
+        self::assertSame(302, $response->getStatusCode());
+        self::assertSame('/notice', $response->headers->get('Location'));
+        self::assertStringContainsString('no-store', (string) $response->headers->get('Cache-Control'));
+    }
+
+    public function testARedirectStatusThatIsNotARedirectFallsBackToOne(): void
+    {
+        // `RedirectResponse` refuses anything outside 300-399 outright, so
+        // the block path's fallback of 400 would throw from inside the
+        // listener — the visitor refused with a stack trace instead of sent
+        // where the rule meant to send them.
+        $response = $this->factory()->redirected(new FirewallRedirectException('/notice', 999));
+
+        self::assertSame(302, $response->getStatusCode());
+        self::assertSame('/notice', $response->headers->get('Location'));
+    }
+
+    public function testALockdownCarriesRetryAfterForTheCdnInFront(): void
+    {
+        // Without it a CDN takes a bare 503 for a permanent condition and
+        // keeps serving the refusal after the lockdown is lifted.
+        $response = $this->factory()->blocked(new FirewallLockdownException('Down for maintenance', 503, 600));
+
+        self::assertSame(503, $response->getStatusCode());
+        self::assertSame('600', $response->headers->get('Retry-After'));
+    }
+
+    public function testAnOrdinaryBlockCarriesNoRetryAfter(): void
+    {
+        $response = $this->factory()->blocked(new FirewallBlockedException('Blocked', 403));
+
+        self::assertFalse($response->headers->has('Retry-After'));
+    }
+
+    public function testLockdownKeepsItsRetryAfterThroughTheErrorController(): void
+    {
+        // The body belongs to the application's error template in this mode;
+        // the headers are still the firewall's to state.
+        try {
+            $this->factory(blockedResponse: 'http_exception')
+                ->blocked(new FirewallLockdownException('Down for maintenance', 503, 600));
+            self::fail('http_exception mode should throw');
+        } catch (HttpException $httpException) {
+            self::assertSame(503, $httpException->getStatusCode());
+            self::assertSame(['Retry-After' => '600'], $httpException->getHeaders());
+        }
     }
 
     public function testASolvedChallengeRedirectsWithThePassCookie(): void
@@ -198,6 +275,31 @@ final class FirewallResponseFactoryTest extends TestCase
     }
 
     /**
+     * A real `ChallengeRequiredException`, from a real firewall.
+     *
+     * Not constructed by hand. The whole value of the 2.26.0 fix is that the
+     * exception carries the provider the firewall resolved and the context it
+     * built — including the `provider_token` this package could not sign —
+     * so an exception assembled here would be testing the assembly rather
+     * than the thing that was fixed.
+     *
+     * @param Request $request
+     *   The request to have challenged.
+     * @param string $fixture
+     *   The configuration to challenge it with.
+     */
+    private function challenge(Request $request, string $fixture = 'challenge.yml'): ChallengeRequiredException
+    {
+        try {
+            Firewall::create([self::CONFIG . $fixture], ['[global][mode]' => 'exception'])->evaluate($request);
+        } catch (ChallengeRequiredException $challengeRequiredException) {
+            return $challengeRequiredException;
+        }
+
+        self::fail(sprintf('%s should have challenged %s', $fixture, $request->getPathInfo()));
+    }
+
+    /**
      * A factory over the challenge fixture.
      *
      * @param array{path: string, domain: string|null, secure: bool, http_only: bool, same_site: 'lax'|'strict'|'none'}|null $cookieOptions
@@ -214,7 +316,6 @@ final class FirewallResponseFactoryTest extends TestCase
         $resolver = new ChallengeConfigResolver([self::CONFIG . 'challenge.yml'], $overrides);
 
         return new FirewallResponseFactory(
-            new ChallengeRenderer($resolver, $recorder),
             $resolver,
             $recorder,
             $cookieOptions ?? self::COOKIE,

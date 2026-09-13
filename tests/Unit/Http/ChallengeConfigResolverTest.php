@@ -11,7 +11,6 @@ declare(strict_types=1);
 
 namespace Kanopi\FirewallBundle\Tests\Unit\Http;
 
-use Kanopi\Firewall\Exception\ConfigurationException;
 use Kanopi\FirewallBundle\Http\ChallengeConfigResolver;
 use Kanopi\FirewallBundle\Http\ChallengeSettings;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -123,32 +122,18 @@ final class ChallengeConfigResolverTest extends TestCase
         self::assertSame($resolver->resolve(), $resolver->resolve());
     }
 
-    public function testItRefusesARuleThatNamesItsOwnProvider(): void
+    public function testARuleNamingItsOwnProviderIsNoLongerRefused(): void
     {
+        // This configuration was a hard refusal until kanopi/firewall
+        // 2.26.0: the bundle rendered the interstitial and could not sign
+        // the `provider_token` such a rule needs, so the alternative to
+        // refusing was a visitor challenged forever. The exception renders
+        // itself now, so the resolver has no opinion about it.
         $resolver = new ChallengeConfigResolver([self::CONFIG . 'per-rule-provider.yml'], []);
 
-        $this->expectException(ConfigurationException::class);
-        // Named, so the fix does not need a search through the config.
-        $this->expectExceptionMessageMatches('/gated-by-recaptcha \(metadata\.challenge_provider: recaptcha\)/');
+        $settings = $resolver->resolve();
 
-        $resolver->resolve();
-    }
-
-    public function testARuleWithoutANameIsIdentifiedByItsClass(): void
-    {
-        $resolver = new ChallengeConfigResolver([[
-            'plugins' => [[
-                'plugin' => 'Kanopi\\Firewall\\Plugins\\Url',
-                'response' => 'challenge',
-                'metadata' => ['challenge_provider' => 'turnstile'],
-                'config' => ['path:/gated'],
-            ]],
-        ]], []);
-
-        $this->expectException(ConfigurationException::class);
-        $this->expectExceptionMessageMatches('/Kanopi\\\\Firewall\\\\Plugins\\\\Url/');
-
-        $resolver->resolve();
+        self::assertSame('math', $settings->provider, 'still the default for rules that name none');
     }
 
     public function testMalformedPluginEntriesAreIgnoredRatherThanFatal(): void

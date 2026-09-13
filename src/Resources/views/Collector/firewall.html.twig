@@ -15,7 +15,8 @@
     {% set verdict = fw.verdict|default('not evaluated') %}
     {% set unhealthy = fw.failed_rules|default([])|length + fw.degraded_backends|default([])|length %}
     {% set colour = verdict in ['blocked', 'challenge failed'] ? 'red'
-        : (verdict in ['challenged', 'challenge solved'] or unhealthy > 0 or fw.error|default(null) ? 'yellow' : '') %}
+        : (verdict in ['challenged', 'challenge solved', 'redirected', 'recorded']
+            or unhealthy > 0 or fw.error|default(null) ? 'yellow' : '') %}
 
     {% set icon %}
         <span class="sf-toolbar-value">{{ verdict }}</span>
@@ -143,6 +144,20 @@
                 <tr>
                     <th>Refused because</th>
                     <td>{{ fw.reason }}</td>
+                </tr>
+            {% endif %}
+            {# Both are the whole content of their decision: a redirect with no
+               destination and a mark with no name say nothing at all. #}
+            {% if fw.location|default(null) %}
+                <tr>
+                    <th>Redirected to</th>
+                    <td>{{ fw.location }}</td>
+                </tr>
+            {% endif %}
+            {% if fw.mark|default(null) %}
+                <tr>
+                    <th>Marked</th>
+                    <td>{{ fw.mark }} <span class="text-muted">(on the request, for the application to act on)</span></td>
                 </tr>
             {% endif %}
             <tr>
