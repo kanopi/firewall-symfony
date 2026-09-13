@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [1.0.0] — 2026-09-12
+
 ### Added
 
 - First release. `kanopi/firewall` as a Symfony bundle: a `kernel.request` listener at
@@ -138,4 +142,5 @@ All notable changes to this project are documented here. The format follows
   line — while analysing clean on 7.4 and 8.1, which is why nobody would have noticed
   without a Symfony axis in CI.
 
-[Unreleased]: https://github.com/kanopi/firewall-symfony/compare/main...HEAD
+[Unreleased]: https://github.com/kanopi/firewall-symfony/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/kanopi/firewall-symfony/releases/tag/v1.0.0
