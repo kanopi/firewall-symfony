@@ -74,10 +74,17 @@ return static function (ContainerConfigurator $containerConfigurator): void {
     $services->set('kanopi_firewall.logger_bridge', LoggerBridge::class)
         ->args([
             param('kanopi_firewall.logging.mode'),
-            // A null second argument when MonologBundle is absent: the
-            // extension has already forced the mode to `off` in that case,
-            // so the service is inert rather than broken.
-            service('monolog.logger.%kanopi_firewall.logging.channel%')->nullOnInvalid(),
+            // Replaced by the extension with a reference to
+            // `monolog.logger.<channel>`, because the channel is a
+            // configured value and a parameter placeholder inside a service
+            // id is not resolved before invalid references are pruned --
+            // which injected NULL here and silently discarded every firewall
+            // log line. See KanopiFirewallExtension::connectLoggerChannel().
+            //
+            // Null is also the honest value when MonologBundle is absent:
+            // the extension has forced the mode to `off` by then, so the
+            // service is inert rather than broken.
+            null,
         ]);
 
     $services->set('kanopi_firewall.proxy_posture', ProxyPosture::class)

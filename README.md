@@ -12,6 +12,10 @@ every request in a `kernel.request` listener and turns the verdict into a `Respo
 > the config root is `kanopi_firewall`, every service id starts `kanopi_firewall.`, and the
 > commands live under `kanopi:firewall:`, each with a short `kfw:` alias.
 
+**New here?** [QUICKSTART.md](QUICKSTART.md) goes from `composer require` to a firewall
+that is enforcing, in about fifteen minutes, with the observe-first path that keeps you
+from finding your false positives in production. This README is the reference behind it.
+
 ## Why a bundle rather than three lines in `public/index.php`
 
 The library's own docs suggest calling `Firewall::create([...])->evaluate()` from the front

@@ -18,6 +18,7 @@ use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Config\Definition\Exception\InvalidConfigurationException;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
+use Symfony\Component\DependencyInjection\Reference;
 use Symfony\Component\DependencyInjection\Exception\InvalidArgumentException;
 
 #[CoversClass(KanopiFirewallExtension::class)]
@@ -270,6 +271,39 @@ final class KanopiFirewallExtensionTest extends TestCase
         (new KanopiFirewallExtension())->load([$config], $container);
 
         return $container;
+    }
+
+    public function testTheLoggerBridgeIsGivenTheChannelByItsRealServiceId(): void
+    {
+        // This was `service('monolog.logger.%kanopi_firewall.logging.channel%')`
+        // in the service file, and it compiled to NULL: a parameter
+        // placeholder inside a *service id* is not resolved before invalid
+        // references are pruned. Nothing failed — `LoggerBridge::apply()`
+        // returns early without a logger — so every firewall decision went
+        // nowhere while the bundle reported `logging.mode: replace`.
+        $container = $this->container(withMonolog: true);
+
+        (new KanopiFirewallExtension())->load([['config_files' => ['/etc/firewall.yml']]], $container);
+
+        $argument = $container->getDefinition('kanopi_firewall.logger_bridge')->getArgument(1);
+
+        self::assertInstanceOf(Reference::class, $argument);
+        self::assertSame('monolog.logger.kanopi_firewall', (string) $argument);
+    }
+
+    public function testTheChannelReferenceFollowsTheConfiguredChannelName(): void
+    {
+        $container = $this->container(withMonolog: true);
+
+        (new KanopiFirewallExtension())->load(
+            [['config_files' => ['/etc/firewall.yml'], 'logging' => ['channel' => 'security_audit']]],
+            $container
+        );
+
+        $argument = $container->getDefinition('kanopi_firewall.logger_bridge')->getArgument(1);
+
+        self::assertInstanceOf(Reference::class, $argument);
+        self::assertSame('monolog.logger.security_audit', (string) $argument);
     }
 
     /**
