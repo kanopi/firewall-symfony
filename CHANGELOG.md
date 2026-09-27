@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [1.2.0] — 2026-09-27
+
 ### Added
 
 - `kanopi_firewall.storage_file`: where FileStorage keeps the block list, resolved by the
@@ -239,6 +243,7 @@ All notable changes to this project are documented here. The format follows
   line — while analysing clean on 7.4 and 8.1, which is why nobody would have noticed
   without a Symfony axis in CI.
 
-[Unreleased]: https://github.com/kanopi/firewall-symfony/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/kanopi/firewall-symfony/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/kanopi/firewall-symfony/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/kanopi/firewall-symfony/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/kanopi/firewall-symfony/releases/tag/v1.0.0
