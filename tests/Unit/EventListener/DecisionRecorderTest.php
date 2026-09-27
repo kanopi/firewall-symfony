@@ -17,6 +17,7 @@ use Kanopi\Firewall\Event\ChallengeSolved;
 use Kanopi\Firewall\Event\RequestAllowed;
 use Kanopi\Firewall\Event\RequestBlocked;
 use Kanopi\Firewall\Event\RequestChallenged;
+use Kanopi\Firewall\Event\RequestMarked;
 use Kanopi\Firewall\Plugins\PluginInterface;
 use Kanopi\FirewallBundle\EventListener\DecisionRecorder;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -90,6 +91,42 @@ final class DecisionRecorderTest extends TestCase
         self::assertSame($second, $recorder->getDecision());
     }
 
+    public function testADefaultAllowDoesNotReplaceTheDecisionBeforeIt(): void
+    {
+        // The ladder carries on after a mark, a record or a tarpit, and a
+        // request nothing else matches ends in a default allow (#9).
+        $recorder = new DecisionRecorder();
+        $marked = new RequestMarked(Request::create('/'), $this->createStub(PluginInterface::class), 'probe', 'firewall.marks');
+
+        $recorder->record($marked);
+        $recorder->record(new RequestAllowed(Request::create('/')));
+
+        self::assertSame($marked, $recorder->getDecision());
+        self::assertCount(2, $recorder->getDecisions(), 'both are kept');
+    }
+
+    public function testAnAllowRuleIsADecisionOfItsOwn(): void
+    {
+        // A matched allow rule (a bypass) is not the ladder's default, so it
+        // is the answer rather than something to look past.
+        $recorder = new DecisionRecorder();
+        $bypass = new RequestAllowed(Request::create('/'), $this->createStub(PluginInterface::class));
+
+        $recorder->record($bypass);
+
+        self::assertSame($bypass, $recorder->getDecision());
+    }
+
+    public function testALoneDefaultAllowIsStillAnAllow(): void
+    {
+        $recorder = new DecisionRecorder();
+        $allowed = new RequestAllowed(Request::create('/'));
+
+        $recorder->record($allowed);
+
+        self::assertSame($allowed, $recorder->getDecision());
+    }
+
     public function testItExposesTheChallengedProvider(): void
     {
         $recorder = new DecisionRecorder();
@@ -121,5 +158,6 @@ final class DecisionRecorderTest extends TestCase
         // stale verdict is worse than none: it would pick a challenge
         // provider for the wrong visitor.
         self::assertNull($recorder->getDecision());
+        self::assertSame([], $recorder->getDecisions());
     }
 }

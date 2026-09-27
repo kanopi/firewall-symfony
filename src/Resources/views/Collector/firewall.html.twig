@@ -166,6 +166,8 @@
                     <td>
                         {% if fw.tarpit.held %}
                             held {{ fw.tarpit.seconds }}s
+                        {% elseif fw.enforced is same as(false) %}
+                            not held <span class="text-muted">(observe mode: logged, not delayed)</span>
                         {% else %}
                             not held <span class="text-muted">(cap full: served at once)</span>
                         {% endif %}

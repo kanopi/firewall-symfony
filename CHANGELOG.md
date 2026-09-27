@@ -20,6 +20,17 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **The profiler said "allowed" for every marked, recorded and tarpitted request** (#9).
+  Those three are non-terminal: the library announces them and carries on, and a request
+  nothing else matches ends in a default `RequestAllowed`. The decision recorder kept only
+  the last event, so the default allow replaced the decision that mattered. Every panel test
+  recorded a single event by hand, so nothing failed. The recorder now keeps every decision
+  and looks past a trailing default allow. The mark and the hold survive a block that follows
+  them, so a slow block shows both.
+- Those same three no longer read as "(observed only)" in enforce mode. `isEnforced()` is
+  always false for them because nothing was refused, and the panel took that to mean
+  observe mode. A tarpit in observe mode now reads `tarpitted (observed only)` rather than
+  `tarpit full`.
 - **Every firewall log line was discarded.** `logging.mode: replace` — the default — wired
   the bridge to `service('monolog.logger.%kanopi_firewall.logging.channel%')`, and a
   parameter placeholder inside a *service id* is not resolved before invalid references are
