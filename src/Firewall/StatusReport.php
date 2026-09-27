@@ -206,6 +206,11 @@ final class StatusReport
                 // list, so a `0` here would be a measurement rather than
                 // the absence of one.
                 'blocks_in_force' => $queryable ? count($this->blockManager->all()) : 'cannot be listed',
+                // And a count from an index that has lost part of itself is
+                // a floor, not a total. Its own field rather than folded into
+                // the count, so a script reading `blocks_in_force` keeps an
+                // integer and a script that cares can tell the difference.
+                'blocks_may_be_incomplete' => $queryable ? $this->blockManager->enumerationGap() : null,
             ];
         } catch (\Throwable $throwable) {
             return ['storage_error' => $throwable->getMessage()];

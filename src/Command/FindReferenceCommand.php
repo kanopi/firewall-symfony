@@ -137,6 +137,26 @@ final class FindReferenceCommand extends AbstractFirewallCommand
      */
     private function reportMiss(ResultPrinter $printer, SymfonyStyle $symfonyStyle, string $reference): int
     {
+        // A reference is found by scanning the list, so a list that has lost
+        // part of its index can miss one that is still in force — and "not
+        // found" is then the one answer that tells a support caller the
+        // customer is not blocked when they are.
+        $gap = $this->blockManager->enumerationGap();
+
+        if ($gap !== null) {
+            $printer->properties(['reference' => $reference, 'found' => 'no', 'may_be_incomplete' => $gap]);
+
+            if (!$printer->isMachineReadable()) {
+                $symfonyStyle->warning(sprintf(
+                    'Results may be incomplete: %s. The block may still be in force; if the customer '
+                    . 'knows their address, kanopi:firewall:blocks --show=ADDRESS does not depend on the index.',
+                    $gap
+                ));
+            }
+
+            return self::EXIT_ERROR;
+        }
+
         $printer->properties(['reference' => $reference, 'found' => 'no']);
 
         if (!$printer->isMachineReadable()) {

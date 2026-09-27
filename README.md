@@ -594,7 +594,7 @@ degrade to a sensible default when nothing was recorded.
 
 ## Requirements
 
-PHP 8.1–8.5 and `kanopi/firewall ^2.30`. 2.26 is what brings the response actions above and the challenge fix below; 2.30 adds the tarpit, whose decisions the profiler panel reports:
+PHP 8.1–8.5 and `kanopi/firewall ^2.33`. 2.26 is what brings the response actions above and the challenge fix below; 2.30 adds the tarpit, whose decisions the profiler panel reports; 2.33 is where a block list can say its answers are incomplete, which the native block commands pass on:
 
 | Symfony | Supported | Tested in CI | Notes |
 |---|---|---|---|
