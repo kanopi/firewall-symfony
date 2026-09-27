@@ -11,7 +11,10 @@ declare(strict_types=1);
 
 namespace Kanopi\FirewallBundle\Tests\Integration;
 
+use Kanopi\Firewall\Logging\LoggingFactory;
 use Kanopi\FirewallBundle\Tests\Fixtures\MathChallengeSolver;
+use Monolog\Handler\TestHandler;
+use Monolog\Level;
 use Kanopi\FirewallBundle\Tests\Fixtures\TestKernel;
 use PHPUnit\Framework\Attributes\CoversNothing;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -43,6 +46,11 @@ final class KernelIntegrationTest extends TestCase
     protected function tearDown(): void
     {
         (new Filesystem())->remove(sys_get_temp_dir() . '/kanopi-firewall-bundle-tests');
+
+        // Static on the library, and the logging test replaces it. Left in
+        // place it would route a later test's firewall through a handler
+        // belonging to a kernel that no longer exists.
+        LoggingFactory::setLogger(new \Monolog\Logger('firewall'));
     }
 
     public function testABlockedRequestNeverReachesTheApplication(): void
@@ -434,6 +442,35 @@ final class KernelIntegrationTest extends TestCase
             $testContainer->has('monolog.logger.kanopi_firewall'),
             'the prepend() hook has to declare the channel or nothing lands in it'
         );
+    }
+
+    public function testADecisionReachesTheApplicationsMonologChannel(): void
+    {
+        // The assertion this suite did not have, and the bug it did not
+        // catch: the bridge was handed NULL, `apply()` returned early, and
+        // the library kept its own handler-less logger. Every decision went
+        // nowhere — no audit trail under `enforce`, and nothing at all under
+        // `observe`, whose only output is the log — while the bundle
+        // reported `logging.mode: replace` and the doctor agreed.
+        //
+        // Asserting the parameter and the channel service exist was not
+        // enough. Only following a real decision to a real handler is.
+        $kernel = $this->boot(['config_files' => [self::CONFIG . 'block.yml']], [], true);
+        $kernel->boot();
+
+        /** @var \Monolog\Logger $channel */
+        $channel = $this->service($kernel, 'monolog.logger.kanopi_firewall');
+        $handler = new TestHandler(Level::Debug);
+        $channel->pushHandler($handler);
+
+        $kernel->handle($this->request('/', '203.0.113.5'));
+
+        self::assertSame(
+            'kanopi_firewall',
+            LoggingFactory::logger()->getName(),
+            'the bridge has to replace the library logger, or nothing it writes is routed'
+        );
+        self::assertNotSame([], $handler->getRecords(), 'and the decision has to arrive in it');
     }
 
     public function testARuleServesItsOwnChallengeProvider(): void

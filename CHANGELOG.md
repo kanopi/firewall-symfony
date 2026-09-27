@@ -14,6 +14,19 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **Every firewall log line was discarded.** `logging.mode: replace` — the default — wired
+  the bridge to `service('monolog.logger.%kanopi_firewall.logging.channel%')`, and a
+  parameter placeholder inside a *service id* is not resolved before invalid references are
+  pruned. The reference matched nothing, `nullOnInvalid()` did as it was asked, and the
+  compiled container read `new LoggerBridge('replace', NULL)`. `apply()` returns early
+  without a logger, so the library kept its own handler-less one: no audit trail under
+  `enforce`, and nothing at all under `observe`, whose only output is the log. The bundle
+  reported `logging.mode: replace` throughout and `kanopi:firewall:doctor` agreed.
+
+  The extension now builds the reference with the channel already interpolated. Three tests
+  cover it, all of which fail against the old wiring — including one that follows a real
+  blocked request into a real Monolog handler, which is the assertion this suite never had.
+  Found by writing QUICKSTART.md and checking that its "read the log" step actually works.
 - A tarpitted request no longer reads as "not evaluated" in the profiler. The decision
   recorder subscribes by class, and `RequestTarpitted` was not on its list.
 

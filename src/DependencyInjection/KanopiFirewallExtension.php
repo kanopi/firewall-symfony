@@ -14,10 +14,12 @@ namespace Kanopi\FirewallBundle\DependencyInjection;
 use Symfony\Component\Config\Definition\Processor;
 use Symfony\Component\Config\FileLocator;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
+use Symfony\Component\DependencyInjection\ContainerInterface;
 use Symfony\Component\DependencyInjection\Exception\InvalidArgumentException;
 use Symfony\Component\DependencyInjection\Extension\Extension;
 use Symfony\Component\DependencyInjection\Extension\PrependExtensionInterface;
 use Symfony\Component\DependencyInjection\Loader\PhpFileLoader;
+use Symfony\Component\DependencyInjection\Reference;
 
 /**
  * Turns `kanopi_firewall` configuration into the two arrays
@@ -150,6 +152,8 @@ final class KanopiFirewallExtension extends Extension implements PrependExtensio
         $loader = new PhpFileLoader($container, new FileLocator(dirname(__DIR__) . '/Resources/config'));
         $loader->load('services.php');
 
+        $this->connectLoggerChannel($container, $config['logging']['channel']);
+
         if (!$config['commands']['enabled']) {
             $this->removeTagged($container, 'console.command');
         }
@@ -236,6 +240,44 @@ final class KanopiFirewallExtension extends Extension implements PrependExtensio
         }
 
         return $overrides;
+    }
+
+    /**
+     * Point the logger bridge at the Monolog channel, by its real id.
+     *
+     * ## Why this is not done in the service file
+     *
+     * It was, as `service('monolog.logger.%kanopi_firewall.logging.channel%')`,
+     * and that silently injected NULL. A parameter placeholder inside a
+     * *service id* is not resolved before invalid references are pruned, so
+     * the reference never matched `monolog.logger.kanopi_firewall` — it was
+     * treated as pointing at nothing, and `nullOnInvalid()` did exactly what
+     * it was asked to. The compiled container read
+     * `new LoggerBridge('replace', NULL)`.
+     *
+     * Nothing failed. `LoggerBridge::apply()` returns early without a logger,
+     * so the library kept its own handler-less one and **every firewall
+     * decision went nowhere** — no audit trail in `enforce`, and nothing at
+     * all in `observe`, whose only output is the log. The bundle reported
+     * `logging.mode: replace` throughout, and `kanopi:firewall:doctor` agreed.
+     *
+     * The channel is known here, so the reference is built here with the id
+     * already interpolated. `NULL_ON_INVALID_REFERENCE` is kept for the
+     * installation with no MonologBundle, where the channel genuinely does
+     * not exist and `loggingMode()` has already forced the mode to `off`.
+     *
+     * @param ContainerBuilder $container
+     *   The container being built.
+     * @param string $channel
+     *   `kanopi_firewall.logging.channel`.
+     */
+    private function connectLoggerChannel(ContainerBuilder $container, string $channel): void
+    {
+        $container->getDefinition('kanopi_firewall.logger_bridge')
+            ->setArgument(1, new Reference(
+                'monolog.logger.' . $channel,
+                ContainerInterface::NULL_ON_INVALID_REFERENCE
+            ));
     }
 
     /**
