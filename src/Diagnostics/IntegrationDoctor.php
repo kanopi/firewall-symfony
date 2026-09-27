@@ -15,6 +15,7 @@ use Kanopi\Firewall\Diagnostics\Diagnosis;
 use Kanopi\FirewallBundle\DependencyInjection\Configuration;
 use Kanopi\FirewallBundle\Firewall\ConfigSnapshot;
 use Kanopi\FirewallBundle\Firewall\ProxyPosture;
+use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\Routing\Exception\ExceptionInterface as RoutingExceptionInterface;
 use Symfony\Component\Routing\Matcher\UrlMatcher;
 use Symfony\Component\Routing\RequestContext;
@@ -328,9 +329,56 @@ final class IntegrationDoctor
 
     /**
      * Does the deployment know whether it is behind a proxy?
+     *
+     * ## Two places to name a proxy, and why they are not equivalent
+     *
+     * kanopi/firewall 2.33.0 accepts `global.trusted_proxies` in its own
+     * YAML, and counts it as an answer to this question. The library does
+     * not call `Request::setTrustedProxies()` with them — that is
+     * process-wide state, and the host's — but applies them for the length
+     * of one evaluation and puts the previous values back. So in a Symfony
+     * application they are **the firewall's alone**: every IP rule sees the
+     * visitor, and every controller, log line and profiler entry still sees
+     * the proxy. That works, and it is why this is advice rather than a
+     * warning; but `framework.trusted_proxies` answers the same question for
+     * the whole application at once, and is the one to reach for.
+     *
+     * When both are set the library uses the host's and ignores its own —
+     * the host knows its infrastructure. The YAML list is then configuration
+     * that does nothing, which is worth a warning precisely because it looks
+     * like it does something: the next person to add a CDN range will add it
+     * there.
      */
     private function checkProxyPosture(): Diagnosis
     {
+        $declared = $this->configSnapshot->trustedProxies();
+
+        if ($declared !== [] && Request::getTrustedProxies() !== []) {
+            return Diagnosis::warning(
+                'global.trusted_proxies is ignored',
+                sprintf(
+                    'The firewall configuration names %s, and framework.trusted_proxies is set too. '
+                    . 'When the application has trusted proxies of its own the library uses those and '
+                    . 'ignores its list, so editing it changes nothing. Keep the proxies in '
+                    . 'framework.trusted_proxies and remove global.trusted_proxies, so there is one source.',
+                    implode(', ', $declared)
+                )
+            );
+        }
+
+        if ($declared !== []) {
+            return Diagnosis::ok(
+                'The proxy posture is asserted, for the firewall only',
+                sprintf(
+                    'global.trusted_proxies names %s. The library applies them while it evaluates a '
+                    . 'request and not afterwards, so IP rules see the visitor while controllers, logs '
+                    . 'and the profiler still see the proxy. Move them to framework.trusted_proxies to '
+                    . 'give the whole application the same answer.',
+                    implode(', ', $declared)
+                )
+            );
+        }
+
         if ($this->proxyPosture->overrides() !== []) {
             return Diagnosis::ok(
                 'The proxy posture is asserted',
@@ -344,7 +392,8 @@ final class IntegrationDoctor
             . 'library warns on every request and every rule reads getClientIp() unfiltered. Behind '
             . 'a CDN that means every visitor arrives as the CDN\'s address: allowlists match nobody '
             . 'and a per-IP rate limit counts the whole internet into one bucket. Set '
-            . 'framework.trusted_proxies, or kanopi_firewall.behind_proxy: false if there is genuinely '
+            . 'framework.trusted_proxies (global.trusted_proxies in the firewall configuration also '
+            . 'works, for the firewall alone), or kanopi_firewall.behind_proxy: false if there is genuinely '
             . 'nothing in front.'
         );
     }

@@ -232,6 +232,57 @@ final class IntegrationDoctorTest extends TestCase
         self::assertSame(Diagnosis::OK, $finding->status);
     }
 
+    public function testProxiesNamedInTheFirewallConfigurationAnswerTheQuestion(): void
+    {
+        // kanopi/firewall 2.33.0 accepts them there and counts them as an
+        // answer, so "nothing says" would be a false warning.
+        $finding = $this->matching(
+            $this->diagnose(configs: $this->withProxies(['10.0.0.0/8']), proxyPosture: new ProxyPosture('auto')),
+            'The proxy posture is asserted, for the firewall only'
+        );
+
+        self::assertSame(Diagnosis::OK, $finding->status);
+        self::assertStringContainsString('10.0.0.0/8', (string) $finding->detail);
+        self::assertStringContainsString('controllers, logs and the profiler still see the proxy', (string) $finding->detail);
+        self::assertStringContainsString('framework.trusted_proxies', (string) $finding->detail);
+    }
+
+    public function testASingleProxyKeywordIsReadAsOneEntry(): void
+    {
+        // A string rather than a list, which is how the library reads it too.
+        $finding = $this->matching(
+            $this->diagnose(configs: $this->withProxies('PRIVATE_SUBNETS'), proxyPosture: new ProxyPosture('auto')),
+            'The proxy posture is asserted, for the firewall only'
+        );
+
+        self::assertStringContainsString('PRIVATE_SUBNETS', (string) $finding->detail);
+    }
+
+    public function testFirewallProxiesAreIgnoredWhenTheApplicationHasItsOwn(): void
+    {
+        // The host's call wins in the library, so the YAML list is
+        // configuration that looks like it does something and does not.
+        Request::setTrustedProxies(['10.0.0.1'], Request::HEADER_X_FORWARDED_FOR);
+
+        $finding = $this->matching(
+            $this->diagnose(configs: $this->withProxies(['173.245.48.0/20']), proxyPosture: new ProxyPosture('auto')),
+            'global.trusted_proxies is ignored'
+        );
+
+        self::assertSame(Diagnosis::WARNING, $finding->status);
+        self::assertStringContainsString('173.245.48.0/20', (string) $finding->detail);
+    }
+
+    public function testAnEmptyProxyListIsNoAnswer(): void
+    {
+        $finding = $this->matching(
+            $this->diagnose(configs: $this->withProxies([]), proxyPosture: new ProxyPosture('auto')),
+            'Nothing says whether this is behind a proxy'
+        );
+
+        self::assertSame(Diagnosis::WARNING, $finding->status);
+    }
+
     public function testInMemoryStorageIsAWarningAboutTheCommandsAsWellAsTheRules(): void
     {
         $finding = $this->matching($this->diagnose(), 'Storage is in-memory');
@@ -359,6 +410,20 @@ final class IntegrationDoctorTest extends TestCase
             new ConfigSnapshot($configs, []),
             $router
         ))->run();
+    }
+
+    /**
+     * The fixture configuration, with `global.trusted_proxies` set.
+     *
+     * @param array<int, string>|string $proxies
+     *   What the YAML would say.
+     *
+     * @return array<int, string|array<string, mixed>>
+     *   Config inputs for `diagnose()`.
+     */
+    private function withProxies(array|string $proxies): array
+    {
+        return [self::CONFIG . 'block.yml', ['global' => ['trusted_proxies' => $proxies]]];
     }
 
     /**

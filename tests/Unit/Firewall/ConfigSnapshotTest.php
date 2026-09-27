@@ -14,6 +14,7 @@ namespace Kanopi\FirewallBundle\Tests\Unit\Firewall;
 use Kanopi\FirewallBundle\Firewall\ConfigSnapshot;
 use Kanopi\FirewallBundle\Tests\Fixtures\ReadsStructuredOutput;
 use PHPUnit\Framework\Attributes\CoversClass;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 #[CoversClass(ConfigSnapshot::class)]
@@ -205,5 +206,50 @@ final class ConfigSnapshotTest extends TestCase
 
         self::assertSame('', $snapshot->storageType(), 'no storage type is different from a default one');
         self::assertSame('block', $snapshot->libraryMode(), 'the library\'s own default');
+    }
+
+    public function testTrustedProxiesAreReadAsTheLibraryReadsThem(): void
+    {
+        $snapshot = new ConfigSnapshot([['global' => ['trusted_proxies' => ['10.0.0.0/8', 'REMOTE_ADDR']]]], []);
+
+        self::assertSame(['10.0.0.0/8', 'REMOTE_ADDR'], $snapshot->trustedProxies());
+    }
+
+    public function testOneProxyAsAStringIsOneEntry(): void
+    {
+        $snapshot = new ConfigSnapshot([['global' => ['trusted_proxies' => 'PRIVATE_SUBNETS']]], []);
+
+        self::assertSame(['PRIVATE_SUBNETS'], $snapshot->trustedProxies());
+    }
+
+    /**
+     * @return iterable<string, array{0: array<string, mixed>}>
+     */
+    public static function provideNoProxies(): iterable
+    {
+        yield 'no global section' => [['plugins' => []]];
+        yield 'key absent' => [['global' => ['mode' => 'log']]];
+        yield 'null' => [['global' => ['trusted_proxies' => null]]];
+        yield 'empty list' => [['global' => ['trusted_proxies' => []]]];
+        yield 'empty string' => [['global' => ['trusted_proxies' => '']]];
+    }
+
+    /**
+     * @param array<string, mixed> $config
+     *   A configuration that declares no proxies, one way or another.
+     */
+    #[DataProvider('provideNoProxies')]
+    public function testEveryWayOfSayingNothingIsNoProxies(array $config): void
+    {
+        self::assertSame([], (new ConfigSnapshot([$config], []))->trustedProxies());
+    }
+
+    public function testAnEntryThatIsNotAStringIsNamedByItsTypeRatherThanDropped(): void
+    {
+        // Malformed, and the library refuses to start over it. Dropping it
+        // here would make the doctor describe a list the firewall rejects.
+        $snapshot = new ConfigSnapshot([['global' => ['trusted_proxies' => [['nested'], 10]]]], []);
+
+        self::assertSame(['array', '10'], $snapshot->trustedProxies());
     }
 }
