@@ -590,7 +590,7 @@ degrade to a sensible default when nothing was recorded.
 
 ## Requirements
 
-PHP 8.1–8.5 and `kanopi/firewall ^2.26`, which is what brings the response actions above and the challenge fix below:
+PHP 8.1–8.5 and `kanopi/firewall ^2.30`. 2.26 is what brings the response actions above and the challenge fix below; 2.30 adds the tarpit, whose decisions the profiler panel reports:
 
 | Symfony | Supported | Tested in CI | Notes |
 |---|---|---|---|

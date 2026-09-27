@@ -15,7 +15,7 @@
     {% set verdict = fw.verdict|default('not evaluated') %}
     {% set unhealthy = fw.failed_rules|default([])|length + fw.degraded_backends|default([])|length %}
     {% set colour = verdict in ['blocked', 'challenge failed'] ? 'red'
-        : (verdict in ['challenged', 'challenge solved', 'redirected', 'recorded']
+        : (verdict in ['challenged', 'challenge solved', 'redirected', 'recorded', 'tarpitted', 'tarpit full']
             or unhealthy > 0 or fw.error|default(null) ? 'yellow' : '') %}
 
     {% set icon %}
@@ -158,6 +158,19 @@
                 <tr>
                     <th>Marked</th>
                     <td>{{ fw.mark }} <span class="text-muted">(on the request, for the application to act on)</span></td>
+                </tr>
+            {% endif %}
+            {% if fw.tarpit|default(null) %}
+                <tr>
+                    <th>Tarpit</th>
+                    <td>
+                        {% if fw.tarpit.held %}
+                            held {{ fw.tarpit.seconds }}s
+                        {% else %}
+                            not held <span class="text-muted">(cap full: served at once)</span>
+                        {% endif %}
+                        <span class="text-muted">— {{ fw.tarpit.in_flight }} in flight</span>
+                    </td>
                 </tr>
             {% endif %}
             <tr>
