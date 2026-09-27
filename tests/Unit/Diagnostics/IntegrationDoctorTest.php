@@ -39,6 +39,13 @@ final class IntegrationDoctorTest extends TestCase
     private const BIN = __DIR__ . '/../../Fixtures/bin';
 
     /**
+     * Directories projectDirectory() made, for tearDown() to remove.
+     *
+     * @var array<int, string>
+     */
+    private array $directories = [];
+
+    /**
      * {@inheritdoc}
      */
     protected function tearDown(): void
@@ -47,6 +54,8 @@ final class IntegrationDoctorTest extends TestCase
         // `Kernel::preBoot()` sets globally. A test that asserted one
         // posture would otherwise decide the next one's answer.
         Request::setTrustedProxies([], Request::HEADER_X_FORWARDED_FOR);
+
+        (new \Symfony\Component\Filesystem\Filesystem())->remove($this->directories);
     }
 
     public function testAWellWiredApplicationReportsNoErrors(): void
@@ -314,6 +323,88 @@ final class IntegrationDoctorTest extends TestCase
         self::assertSame(OpaqueStorage::class, $finding->detail);
     }
 
+    public function testFileStorageSaysWhereTheBlockListIs(): void
+    {
+        // "Where is this stored?" is the question the starter YAML answers
+        // worst, so the answer is given even when nothing is wrong with it.
+        $directory = $this->projectDirectory();
+
+        $finding = $this->matching($this->diagnose(configs: $this->withStorageFile($directory . '/blocked.data')), 'Block list');
+
+        self::assertSame(Diagnosis::OK, $finding->status);
+        self::assertSame($directory . '/blocked.data', $finding->detail);
+    }
+
+    public function testAPlaceholderTheContainerNeverResolvedIsAnError(): void
+    {
+        // .env says %kernel.project_dir%, and nothing wired it through
+        // kanopi_firewall.storage_file, so the library got it verbatim.
+        $finding = $this->matching(
+            $this->diagnose(configs: $this->withStorageFile('%kernel.project_dir%/var/firewall/blocked.data')),
+            'unresolved placeholder'
+        );
+
+        self::assertSame(Diagnosis::ERROR, $finding->status);
+        self::assertStringContainsString('env(resolve:FIREWALL_STORAGE_FILE)', (string) $finding->detail);
+    }
+
+    public function testARelativeStoragePathSplitsTheBlockList(): void
+    {
+        $finding = $this->matching($this->diagnose(configs: $this->withStorageFile('var/firewall/blocked.data')), 'relative');
+
+        self::assertSame(Diagnosis::WARNING, $finding->status);
+        self::assertStringContainsString('two block lists', (string) $finding->detail);
+    }
+
+    public function testAMissingStorageDirectoryStopsTheFirewallStarting(): void
+    {
+        $finding = $this->matching(
+            $this->diagnose(configs: $this->withStorageFile($this->projectDirectory() . '/missing/blocked.data')),
+            'does not exist'
+        );
+
+        self::assertSame(Diagnosis::ERROR, $finding->status);
+    }
+
+    public function testAStoragePathNobodyCanWriteIsAnError(): void
+    {
+        $directory = $this->projectDirectory();
+        touch($directory . '/blocked.data');
+        chmod($directory . '/blocked.data', 0400);
+
+        try {
+            $findings = $this->diagnose(configs: $this->withStorageFile($directory . '/blocked.data'));
+        } finally {
+            chmod($directory . '/blocked.data', 0600);
+        }
+
+        if (is_writable($directory . '/blocked.data') && function_exists('posix_geteuid') && posix_geteuid() === 0) {
+            self::markTestSkipped('root can write a read-only file.');
+        }
+
+        self::assertSame(Diagnosis::ERROR, $this->matching($findings, 'not writable')->status);
+    }
+
+    public function testABlockListInTheTempDirectoryIsAWarning(): void
+    {
+        $finding = $this->matching(
+            $this->diagnose(configs: $this->withStorageFile(sys_get_temp_dir() . '/firewall-blocked.data')),
+            'temp directory'
+        );
+
+        self::assertSame(Diagnosis::WARNING, $finding->status);
+    }
+
+    public function testFileStorageWithNoPathSaysHowToGiveItOne(): void
+    {
+        $configs = [['storage' => ['type' => 'Kanopi\\Firewall\\Storage\\FileStorage'], 'plugins' => [['plugin' => 'A']]]];
+
+        $finding = $this->matching($this->diagnose(configs: $configs), 'names no storage_file');
+
+        self::assertSame(Diagnosis::WARNING, $finding->status);
+        self::assertStringContainsString('kanopi:firewall:init', (string) $finding->detail);
+    }
+
     public function testFailOpenIsStatedRatherThanJudged(): void
     {
         // A deliberate choice, and the right one for some deployments. What
@@ -424,6 +515,33 @@ final class IntegrationDoctorTest extends TestCase
     private function withProxies(array|string $proxies): array
     {
         return [self::CONFIG . 'block.yml', ['global' => ['trusted_proxies' => $proxies]]];
+    }
+
+    /**
+     * The fixture configuration, over FileStorage at a given path.
+     *
+     * @return array<int, string|array<string, mixed>>
+     *   Config inputs for `diagnose()`.
+     */
+    private function withStorageFile(string $file): array
+    {
+        return [
+            self::CONFIG . 'block.yml',
+            ['storage' => ['type' => 'Kanopi\\Firewall\\Storage\\FileStorage', 'config' => ['storage_file' => $file]]],
+        ];
+    }
+
+    /**
+     * A directory outside the temp dir — itself a finding — under the
+     * repository's ignored /var/, removed after the test.
+     */
+    private function projectDirectory(): string
+    {
+        $directory = dirname(__DIR__, 3) . '/var/doctor-test-' . bin2hex(random_bytes(4));
+        (new \Symfony\Component\Filesystem\Filesystem())->mkdir($directory);
+        $this->directories[] = $directory;
+
+        return $directory;
     }
 
     /**

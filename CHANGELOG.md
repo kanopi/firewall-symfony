@@ -6,7 +6,27 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+- `kanopi_firewall.storage_file`: where FileStorage keeps the block list, resolved by the
+  container, so `'%env(resolve:FIREWALL_STORAGE_FILE)%'` with
+  `FIREWALL_STORAGE_FILE="%kernel.project_dir%/var/firewall/blocked.data"` in `.env` gives
+  the web server and `bin/console` one absolute path (#15). It is applied as a config input
+  rather than an override, so the native block commands read the file the site writes.
+- `kanopi:firewall:init`, for file storage, adds that variable to `.env` inside Flex-style
+  `###> kanopi/firewall-symfony ###` markers, creates `var/firewall/`, and sets
+  `storage_file` in `config/packages/kanopi_firewall.yaml`, writing that file when there is
+  none. Nothing already set is overwritten. `--no-env` writes the YAML alone.
+- `kanopi:firewall:doctor` reports where the block list is. It errors on a
+  `%kernel.project_dir%` value that reached the library unresolved, on a directory that
+  doesn't exist (the firewall can't start) and on a path that isn't writable. It warns on
+  the temp directory, on a relative path from Symfony configuration, and on FileStorage
+  with no path at all.
+
+### Fixed
+
+- `kanopi:firewall:init --help` said the default output was `firewall.yml` in the current
+  directory. It is `config/firewall.yml`.
 
 ## [1.1.0] — 2026-09-27
 

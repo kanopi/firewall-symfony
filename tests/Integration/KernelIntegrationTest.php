@@ -231,6 +231,44 @@ final class KernelIntegrationTest extends TestCase
         self::assertTrue($slowBlock['tarpit']['held']);
     }
 
+    public function testTheSiteAndTheBlockCommandsShareOneBlockListWhereverTheyRun(): void
+    {
+        // The reason storage_file exists. `.env` carries %kernel.project_dir%,
+        // the container resolves it, and the result is an input — so the
+        // BlockList behind kanopi:firewall:unblock reads the file the site
+        // wrote, even from a working directory that is not the project root.
+        $directory = dirname(__DIR__, 2) . '/var/firewall-share-test';
+        (new Filesystem())->mkdir($directory);
+        $previous = [$_SERVER['FIREWALL_STORAGE_FILE'] ?? null, getcwd()];
+        $_SERVER['FIREWALL_STORAGE_FILE'] = '%kernel.project_dir%/var/firewall-share-test/blocked.data';
+        chdir(sys_get_temp_dir());
+
+        try {
+            $kernel = $this->boot([
+                'config_files' => [self::CONFIG . 'block.yml'],
+                'settings' => ['storage' => ['type' => \Kanopi\Firewall\Storage\FileStorage::class]],
+                'storage_file' => '%env(resolve:FIREWALL_STORAGE_FILE)%',
+            ]);
+
+            self::assertSame(403, $kernel->handle($this->request('/', '203.0.113.5'))->getStatusCode());
+            self::assertFileExists($directory . '/blocked.data', 'resolved against the project, not the working directory');
+
+            /** @var \Kanopi\FirewallBundle\Firewall\BlockManager $blocks */
+            $blocks = $this->service($kernel, 'test.kanopi_firewall.block_manager');
+
+            self::assertNotNull($blocks->lookup('203.0.113.5'), 'the command line sees the block the site wrote');
+        } finally {
+            if ($previous[0] === null) {
+                unset($_SERVER['FIREWALL_STORAGE_FILE']);
+            } else {
+                $_SERVER['FIREWALL_STORAGE_FILE'] = $previous[0];
+            }
+
+            chdir((string) $previous[1]);
+            (new Filesystem())->remove($directory);
+        }
+    }
+
     public function testTheProfilerPanelReportsTheVerdictAndHealth(): void
     {
         // The collector only runs when the profiler does, so this needs a

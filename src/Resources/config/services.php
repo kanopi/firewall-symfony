@@ -30,6 +30,7 @@ use Kanopi\FirewallBundle\Command\RulesCommand;
 use Kanopi\FirewallBundle\Command\ScriptRunner;
 use Kanopi\FirewallBundle\Command\SourcesCommand;
 use Kanopi\FirewallBundle\Command\StatusCommand;
+use Kanopi\FirewallBundle\Command\StorageFileWiring;
 use Kanopi\FirewallBundle\Command\UnblockCommand;
 use Kanopi\FirewallBundle\DataCollector\FirewallDataCollector;
 use Kanopi\FirewallBundle\Diagnostics\IntegrationDoctor;
@@ -238,7 +239,6 @@ return static function (ContainerConfigurator $containerConfigurator): void {
         'sources' => SourcesCommand::class,
         'migrate' => MigrateCommand::class,
         'log-prune' => LogPruneCommand::class,
-        'init' => InitCommand::class,
     ];
 
     foreach ($scriptCommands as $name => $class) {
@@ -253,6 +253,16 @@ return static function (ContainerConfigurator $containerConfigurator): void {
                 'command' => 'kanopi:firewall:' . $name . '|kfw:' . $name,
             ]);
     }
+
+    // On its own because it also wires the storage path, which needs to know
+    // where the project is. See StorageFileWiring.
+    $services->set('kanopi_firewall.command.init', InitCommand::class)
+        ->args([
+            service('kanopi_firewall.script_runner'),
+            service('kanopi_firewall.effective_config'),
+            inline_service(StorageFileWiring::class)->args([param('kernel.project_dir')]),
+        ])
+        ->tag('console.command', ['command' => 'kanopi:firewall:init|kfw:init']);
 
     // Registered on its own because it runs the bundle's own checks before
     // the script's, so it takes a collaborator the other wrappers do not.

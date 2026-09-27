@@ -425,7 +425,108 @@ final class IntegrationDoctor
             );
         }
 
+        if (str_contains($type, 'FileStorage')) {
+            return $this->checkStorageFile($this->configSnapshot->storageFile());
+        }
+
         return Diagnosis::ok('Storage backend', $type);
+    }
+
+    /**
+     * Where is the block list, and will every worker find the same one?
+     *
+     * The path is reported even when nothing is wrong with it, because
+     * "where is this stored?" is a question the configuration answers badly:
+     * the starter file says `%env(default:/tmp/…:FIREWALL_STORAGE_FILE)%`,
+     * and what that comes to depends on an environment the file cannot see.
+     *
+     * @param string|null $file
+     *   `storage.config.storage_file` from the merged configuration.
+     */
+    private function checkStorageFile(?string $file): Diagnosis
+    {
+        if ($file === null) {
+            return Diagnosis::warning(
+                'FileStorage names no storage_file',
+                'The library falls back to a per-user directory under the system temp dir. Set '
+                . 'kanopi_firewall.storage_file: \'%env(resolve:FIREWALL_STORAGE_FILE)%\' and '
+                . 'FIREWALL_STORAGE_FILE="%kernel.project_dir%/var/firewall/blocked.data" in .env — '
+                . 'kanopi:firewall:init writes both.'
+            );
+        }
+
+        // The half-wired case: .env carries a container placeholder, and the
+        // library — which resolves %env()% itself, from the YAML — was handed
+        // it verbatim because kanopi_firewall.storage_file is not set.
+        if (preg_match('/%[a-z_.]+%/i', $file) === 1) {
+            return Diagnosis::error(
+                'The storage path contains an unresolved placeholder',
+                sprintf(
+                    '%s reached the library as written. A %%kernel.project_dir%%-style value is only '
+                    . 'resolved by the container: set kanopi_firewall.storage_file: '
+                    . '\'%%env(resolve:FIREWALL_STORAGE_FILE)%%\'.',
+                    $file
+                )
+            );
+        }
+
+        if (!$this->isAbsolute($file)) {
+            return Diagnosis::warning(
+                'The storage path is relative',
+                sprintf(
+                    '%s came from Symfony configuration, where there is no file for it to be '
+                    . 'relative to, so it resolves against the working directory: public/ for the web '
+                    . 'server and the project root for bin/console — two block lists, and an unblock '
+                    . 'from the command line that the site never sees. Use %%kernel.project_dir%% '
+                    . 'through kanopi_firewall.storage_file, or set it in firewall.yml, where a '
+                    . 'relative path resolves against the file.',
+                    $file
+                )
+            );
+        }
+
+        $directory = dirname($file);
+
+        if (!is_dir($directory)) {
+            return Diagnosis::error(
+                'The storage directory does not exist',
+                sprintf(
+                    '%s. The library creates the file but not its directory, so the firewall cannot '
+                    . 'start — a 500 on every request under on_startup_failure: fail_closed.',
+                    $directory
+                )
+            );
+        }
+
+        if (!is_writable(file_exists($file) ? $file : $directory)) {
+            return Diagnosis::error(
+                'The storage path is not writable',
+                sprintf('%s must be writable by the web user and by whoever runs bin/console.', $file)
+            );
+        }
+
+        $temp = rtrim(sys_get_temp_dir(), DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR;
+
+        if (str_starts_with($file, $temp) || str_starts_with($file, '/tmp/')) {
+            return Diagnosis::warning(
+                'The block list is in the temp directory',
+                sprintf(
+                    '%s. It is cleared on reboot, and on some hosts is private to each process, '
+                    . 'which quietly gives every worker a block list of its own.',
+                    $file
+                )
+            );
+        }
+
+        return Diagnosis::ok('Block list', $file);
+    }
+
+    /**
+     * Whether a path is absolute, on either family of filesystem.
+     */
+    private function isAbsolute(string $path): bool
+    {
+        return str_starts_with($path, '/') || preg_match('~^[A-Za-z]:[\\\\/]~', $path) === 1;
     }
 
     /**

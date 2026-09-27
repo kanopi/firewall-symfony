@@ -30,6 +30,7 @@ use Symfony\Component\Config\Definition\ConfigurationInterface;
  *     config_files: array<int, string>,
  *     settings: array<string, mixed>,
  *     overrides: array<string, mixed>,
+ *     storage_file: string|null,
  *     behind_proxy: bool|'auto',
  *     on_startup_failure: 'fail_closed'|'fail_open',
  *     blocked_response: 'plain'|'http_exception',
@@ -184,6 +185,16 @@ final class Configuration implements ConfigurationInterface
         );
         $overrides->normalizeKeys(false);
         $overrides->variablePrototype();
+
+        $children->scalarNode('storage_file')
+            ->defaultNull()
+            ->info(
+                'Where FileStorage keeps the block list, applied after every config input. Resolved by '
+                . 'the container, so "%env(resolve:FIREWALL_STORAGE_FILE)%" with '
+                . 'FIREWALL_STORAGE_FILE="%kernel.project_dir%/var/firewall/blocked.data" in .env gives '
+                . 'every worker and bin/console the same absolute path. Null leaves the YAML value.'
+            )
+            ->example('%env(resolve:FIREWALL_STORAGE_FILE)%');
 
         $children->enumNode('behind_proxy')
             ->values(['auto', true, false])

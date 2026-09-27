@@ -21,6 +21,7 @@ use Kanopi\FirewallBundle\Command\LogPruneCommand;
 use Kanopi\FirewallBundle\Command\MigrateCommand;
 use Kanopi\FirewallBundle\Command\RuleCommand;
 use Kanopi\FirewallBundle\Command\ScriptRunner;
+use Kanopi\FirewallBundle\Command\StorageFileWiring;
 use Kanopi\FirewallBundle\Command\SourcesCommand;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -43,6 +44,21 @@ final class ScriptCommandTest extends TestCase
      * Directory holding the stand-in scripts.
      */
     private const BIN = __DIR__ . '/../../Fixtures/bin';
+
+    /**
+     * Project directories project() made, for tearDown() to remove.
+     *
+     * @var array<int, string>
+     */
+    private array $projects = [];
+
+    /**
+     * {@inheritdoc}
+     */
+    protected function tearDown(): void
+    {
+        (new \Symfony\Component\Filesystem\Filesystem())->remove($this->projects);
+    }
 
     public function testTheConfiguredPathsAreAppendedAsBareArguments(): void
     {
@@ -214,6 +230,45 @@ final class ScriptCommandTest extends TestCase
 
         self::assertStringContainsString('ARGS:--platform=drupal|--mode=log', $tester->getDisplay());
         self::assertStringNotContainsString('/etc/firewall.yml', $tester->getDisplay());
+    }
+
+    public function testInitWiresTheStoragePathAfterWritingFileStorage(): void
+    {
+        $project = $this->project();
+        $tester = $this->tester(new InitCommand(...[...$this->collaborators([]), new StorageFileWiring($project)]));
+
+        self::assertSame(0, $tester->execute(['--platform' => 'drupal']));
+
+        self::assertStringContainsString('Added FIREWALL_STORAGE_FILE to .env.', $tester->getDisplay());
+        self::assertFileExists($project . '/.env');
+        self::assertStringNotContainsString('no-env', $tester->getDisplay(), 'a bundle option, not the script\'s');
+    }
+
+    /**
+     * @return iterable<string, array{0: array<string, mixed>}>
+     */
+    public static function provideRunsThatLeaveTheApplicationAlone(): iterable
+    {
+        yield '--print writes nothing' => [['--print' => true]];
+        yield '--no-env asks for the YAML alone' => [['--no-env' => true]];
+        yield 'redis has no file to place' => [['--storage' => 'redis']];
+        yield 'nor does a database' => [['--storage' => 'database']];
+        yield 'a script that failed wrote no YAML to wire' => [['forward' => ['--exit=2']]];
+    }
+
+    /**
+     * @param array<string, mixed> $input
+     */
+    #[DataProvider('provideRunsThatLeaveTheApplicationAlone')]
+    public function testInitLeavesTheApplicationAloneWhenItShould(array $input): void
+    {
+        $project = $this->project();
+        $tester = $this->tester(new InitCommand(...[...$this->collaborators([]), new StorageFileWiring($project)]));
+
+        $tester->execute($input);
+
+        self::assertFileDoesNotExist($project . '/.env');
+        self::assertDirectoryDoesNotExist($project . '/var/firewall');
     }
 
     public function testTheCommandThatTakesNoConfigurationHasNoConfigOption(): void
@@ -388,6 +443,18 @@ final class ScriptCommandTest extends TestCase
     private function collaborators(array $configs, array $overrides = []): array
     {
         return [new ScriptRunner(self::BIN), new EffectiveConfig($configs, $overrides)];
+    }
+
+    /**
+     * An empty project directory, removed after the test.
+     */
+    private function project(): string
+    {
+        $project = sys_get_temp_dir() . '/kanopi-firewall-init-' . bin2hex(random_bytes(4));
+        (new \Symfony\Component\Filesystem\Filesystem())->mkdir($project);
+        $this->projects[] = $project;
+
+        return $project;
     }
 
     /**

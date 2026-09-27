@@ -116,6 +116,9 @@ kanopi_firewall:
     overrides:
         '[global][banning_status_code]': 403
 
+    # Where FileStorage keeps the block list. See "Where the block list lives".
+    storage_file: '%env(resolve:FIREWALL_STORAGE_FILE)%'
+
     # auto | true | false. See "Trusted proxies" below.
     behind_proxy: auto
 
@@ -167,9 +170,45 @@ them as plain strings and that is only safe if the library cannot be reading dif
 ones.
 
 `config_files` and `settings` are two inputs to one merge, not alternatives. Files come
-first, then `settings`, then `overrides` — so an environment-specific
+first, then `settings`, then `storage_file`, then `overrides` — so an environment-specific
 `config/packages/prod/kanopi_firewall.yaml` can adjust a shared `firewall.yml` without
 copying it.
+
+### Where the block list lives
+
+The starter `firewall.yml` stores blocks at
+`%env(default:/tmp/firewall-blocked.data:FIREWALL_STORAGE_FILE)%`, and nothing in a Symfony
+application defines that variable. So unless you do something, the block list is in `/tmp`,
+which is cleared on reboot and on some hosts is private to each process.
+
+For file storage, `kanopi:firewall:init` takes care of it:
+
+```dotenv
+# .env
+###> kanopi/firewall-symfony ###
+FIREWALL_STORAGE_FILE="%kernel.project_dir%/var/firewall/blocked.data"
+###< kanopi/firewall-symfony ###
+```
+
+```yaml
+# config/packages/kanopi_firewall.yaml
+kanopi_firewall:
+    storage_file: '%env(resolve:FIREWALL_STORAGE_FILE)%'
+```
+
+It also creates `var/firewall/`, because the library creates the file but not its directory.
+It never overwrites an existing value, and `--no-env` skips all three.
+
+This is the pattern DoctrineBundle uses for `DATABASE_URL`: `.env` is committed, so it can't
+hold an absolute path, and `resolve:` turns `%kernel.project_dir%` into one. The two halves
+only work together. A `%kernel.project_dir%` value that reaches the library without
+`storage_file` is used as a literal directory name, and `kanopi:firewall:doctor` reports it
+as an error. The doctor also shows where the block list actually is, and warns when that's
+the temp directory, a directory that doesn't exist, or a relative path from Symfony
+configuration (which has no file to be relative to).
+
+`storage_file` is applied as a config input rather than an override, so the native block
+commands read the same file the site writes, whichever directory `bin/console` runs from.
 
 ## Listener priority
 

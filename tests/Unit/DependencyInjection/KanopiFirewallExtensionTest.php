@@ -251,6 +251,35 @@ final class KanopiFirewallExtensionTest extends TestCase
         $this->load(['settings' => 'firewall.yml']);
     }
 
+    public function testAStorageFileIsTheLastConfigInput(): void
+    {
+        // An input, not an override: the native block commands' BlockList is
+        // built from the inputs alone, and the site and the command line
+        // must be reading the same file.
+        $container = $this->load([
+            'config_files' => ['/etc/firewall.yml'],
+            'settings' => ['global' => ['behind_proxy' => false]],
+            'storage_file' => '%env(resolve:FIREWALL_STORAGE_FILE)%',
+        ]);
+
+        self::assertSame(
+            [
+                '/etc/firewall.yml',
+                ['global' => ['behind_proxy' => false]],
+                ['storage' => ['config' => ['storage_file' => '%env(resolve:FIREWALL_STORAGE_FILE)%']]],
+            ],
+            $container->getParameter(KanopiFirewallExtension::PARAM_CONFIGS)
+        );
+        self::assertArrayNotHasKey('[storage][config][storage_file]', $this->overrides($container));
+    }
+
+    public function testNoStorageFileLeavesTheYamlAnswerAlone(): void
+    {
+        $container = $this->load(['config_files' => ['/etc/firewall.yml']]);
+
+        self::assertSame(['/etc/firewall.yml'], $container->getParameter(KanopiFirewallExtension::PARAM_CONFIGS));
+    }
+
     public function testProviderOptionsMustBeAnArray(): void
     {
         $this->expectException(InvalidConfigurationException::class);
