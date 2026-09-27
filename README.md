@@ -210,6 +210,36 @@ configuration (which has no file to be relative to).
 `storage_file` is applied as a config input rather than an override, so the native block
 commands read the same file the site writes, whichever directory `bin/console` runs from.
 
+### Database or Redis storage
+
+The starter file for `--storage=database` or `--storage=redis` reads `DB_HOST`, `DB_USER`,
+`REDIS_HOST` and friends. In a Symfony application, point it at the connection you already
+have instead. `%env()%` in `firewall.yml` is resolved by the library, which reads the same
+`$_SERVER` that Symfony's Dotenv fills, so the app's own variables work there:
+
+```yaml
+# config/firewall.yml
+storage:
+  type: "Kanopi\\Firewall\\Storage\\DatabaseStorage"
+  config:
+    connection:
+      dsn: "%env(DATABASE_URL)%"
+```
+
+```yaml
+storage:
+  type: "Kanopi\\Firewall\\Storage\\RedisStorage"
+  config:
+    instance: "%connection(redis)%"
+
+connections:
+  redis: "%env(REDIS_URL)%"
+```
+
+One set of credentials, rotated in one place. A named connection (`connections:`,
+kanopi/firewall 2.33) is also how a storage backend and a log handler share one client
+rather than opening two. The library's `docs/configuration/connections.md` has the rest.
+
 ## Listener priority
 
 Default **250**, on `kernel.request`. Relative to what Symfony registers on the same event:

@@ -104,6 +104,34 @@ final class KernelIntegrationTest extends TestCase
         self::assertStringContainsString('no-store', (string) $response->headers->get('Cache-Control'));
     }
 
+    public function testAnEmptySecretInTheEnvironmentLeavesTheYamlSecretAlone(): void
+    {
+        // A committed .env leaves FIREWALL_CHALLENGE_SECRET empty, as Symfony
+        // leaves APP_SECRET. At compile time the bundle sees a placeholder and
+        // writes the override; at runtime it resolved to '' and replaced the
+        // secret firewall.yml carries, so every challenge rule failed to start.
+        $previous = $_SERVER['FIREWALL_CHALLENGE_SECRET'] ?? null;
+        $_SERVER['FIREWALL_CHALLENGE_SECRET'] = '';
+
+        try {
+            $kernel = $this->boot([
+                'config_files' => [self::CONFIG . 'challenge.yml'],
+                'challenge' => ['secret' => '%env(FIREWALL_CHALLENGE_SECRET)%'],
+            ]);
+
+            $response = $kernel->handle($this->request('/gated', '198.51.100.1'));
+        } finally {
+            if ($previous === null) {
+                unset($_SERVER['FIREWALL_CHALLENGE_SECRET']);
+            } else {
+                $_SERVER['FIREWALL_CHALLENGE_SECRET'] = $previous;
+            }
+        }
+
+        self::assertSame(200, $response->getStatusCode());
+        self::assertStringContainsString('/_firewall/challenge', (string) $response->getContent(), 'the interstitial, not an error page');
+    }
+
     public function testASolvedChallengeSetsThePassCookieAndRedirects(): void
     {
         $kernel = $this->boot(['config_files' => [self::CONFIG . 'challenge.yml']]);

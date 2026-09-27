@@ -118,7 +118,7 @@ final class FirewallFactory
         try {
             $this->firewall = Firewall::create(
                 $this->configs,
-                array_merge($this->overrides, $this->proxyPosture->overrides()),
+                array_merge(LibraryOverrides::resolved($this->overrides), $this->proxyPosture->overrides()),
                 $this->eventDispatcher
             );
         } catch (\Throwable $throwable) {
