@@ -27,6 +27,7 @@ use Kanopi\FirewallBundle\Firewall\FirewallFactory;
 use Kanopi\FirewallBundle\Firewall\LoggerBridge;
 use Kanopi\FirewallBundle\Firewall\ProxyPosture;
 use Kanopi\FirewallBundle\Firewall\StatusReport;
+use Kanopi\FirewallBundle\Tests\Fixtures\GappyStorage;
 use Kanopi\FirewallBundle\Tests\Fixtures\OpaqueStorage;
 use Kanopi\FirewallBundle\Tests\Fixtures\ReadsStructuredOutput;
 use Kanopi\FirewallBundle\Tests\Fixtures\RefusingStorage;
@@ -494,6 +495,89 @@ final class NativeCommandTest extends TestCase
         self::assertCount(1, $blocks->all());
     }
 
+    public function testARangeLiftFromAnIndexWithAGapSaysTheCountIsNotEverything(): void
+    {
+        $blocks = $this->gappyBlockManager();
+        $blocks->add('198.51.100.9', 600);
+        $blocks->add('198.51.100.10', 600);
+
+        $tester = $this->tester(new UnblockCommand($blocks));
+
+        self::assertSame(0, $tester->execute(['ip' => '198.51.100.0/24']));
+        $display = $tester->getDisplay();
+        self::assertStringContainsString('Lifted 1 block', $display);
+        self::assertStringContainsString('Results may be incomplete: the index could not be read', $display);
+        self::assertStringContainsString('still in', $display);
+    }
+
+    public function testNothingMatchingIsNotCalledCompleteWhenTheIndexHasAGap(): void
+    {
+        // "Nothing in the block list matches" is the false confidence the
+        // gap exists to prevent: the one address in range is still blocked.
+        $blocks = $this->gappyBlockManager();
+        $blocks->add('198.51.100.9', 600);
+
+        $tester = $this->tester(new UnblockCommand($blocks));
+        $tester->execute(['ip' => '198.51.100.0/24', '--dry-run' => true]);
+        $display = $tester->getDisplay();
+
+        self::assertStringNotContainsString('Nothing in the block list matches', $display);
+        self::assertStringContainsString('Nothing the block list could see matches', $display);
+        self::assertStringContainsString('was not counted', $display);
+    }
+
+    public function testEmptyingAListWithAGapSaysWhatWasLeftBehind(): void
+    {
+        $blocks = $this->gappyBlockManager();
+        $blocks->add('198.51.100.9', 600);
+
+        $tester = $this->tester(new UnblockCommand($blocks));
+        $tester->execute(['--all' => true, '--force' => true]);
+        $display = $tester->getDisplay();
+
+        self::assertStringNotContainsString('already empty', $display);
+        self::assertStringContainsString('Results may be incomplete', $display);
+        self::assertStringContainsString('was not lifted', $display);
+        self::assertNotNull($blocks->lookup('198.51.100.9'), 'which is exactly what the warning is about');
+    }
+
+    public function testOneAddressIsLiftedWithoutAWarningAboutAnIndexItDidNotUse(): void
+    {
+        $blocks = $this->gappyBlockManager();
+        $blocks->add('198.51.100.9', 600);
+
+        $tester = $this->tester(new UnblockCommand($blocks));
+
+        self::assertSame(0, $tester->execute(['ip' => '198.51.100.9']));
+        self::assertStringContainsString('Lifted 1 block', $tester->getDisplay());
+        self::assertStringNotContainsString('incomplete', $tester->getDisplay());
+        self::assertNull($blocks->lookup('198.51.100.9'));
+    }
+
+    public function testAReferenceMissFromAnIndexWithAGapDoesNotSayTheCustomerIsUnblocked(): void
+    {
+        $blocks = $this->gappyBlockManager();
+        $blocks->add('198.51.100.9', 600);
+
+        $tester = $this->tester(new FindReferenceCommand($blocks));
+
+        self::assertSame(1, $tester->execute(['reference' => '0123456789ABCDEF0123456789ABCDEF']));
+        self::assertStringContainsString('Results may be incomplete', $tester->getDisplay());
+        self::assertStringContainsString('may still be in force', $tester->getDisplay());
+    }
+
+    public function testAReferenceMissCarriesTheGapForAScriptToo(): void
+    {
+        $tester = $this->tester(new FindReferenceCommand($this->gappyBlockManager()));
+        $tester->execute(['reference' => '0123456789ABCDEF0123456789ABCDEF', '--format' => 'json']);
+
+        $decoded = json_decode($tester->getDisplay(), true);
+
+        self::assertIsArray($decoded);
+        self::assertSame('no', $decoded['found']);
+        self::assertSame('the index could not be read: shard 3 is gone', $decoded['may_be_incomplete']);
+    }
+
     public function testAnAddressAndAllTogetherIsRefusedRatherThanResolved(): void
     {
         // Guessing that --all wins would empty the list for somebody who
@@ -673,6 +757,22 @@ final class NativeCommandTest extends TestCase
         return new BlockManager(new BlockList([[
             'global' => ['behind_proxy' => false],
             'storage' => ['type' => $storage],
+            'logger' => ['handlers' => [['class' => 'Monolog\Handler\NullHandler']]],
+            'plugins' => [],
+        ]]));
+    }
+
+    /**
+     * A manager over a backend whose index has lost 198.51.100.9.
+     */
+    private function gappyBlockManager(): BlockManager
+    {
+        return new BlockManager(new BlockList([[
+            'global' => ['behind_proxy' => false],
+            'storage' => ['type' => GappyStorage::class, 'config' => [
+                'gap' => 'the index could not be read: shard 3 is gone',
+                'lost' => ['198.51.100.9'],
+            ]],
             'logger' => ['handlers' => [['class' => 'Monolog\Handler\NullHandler']]],
             'plugins' => [],
         ]]));

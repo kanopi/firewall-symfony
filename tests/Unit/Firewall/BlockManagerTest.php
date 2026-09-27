@@ -15,6 +15,7 @@ use Kanopi\Firewall\Storage\InMemoryStorage;
 use Kanopi\Firewall\Utility\BlockList;
 use Kanopi\FirewallBundle\Exception\IntegrationException;
 use Kanopi\FirewallBundle\Firewall\BlockManager;
+use Kanopi\FirewallBundle\Tests\Fixtures\GappyStorage;
 use Kanopi\FirewallBundle\Tests\Fixtures\OpaqueStorage;
 use Kanopi\FirewallBundle\Tests\Fixtures\RefusingStorage;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -293,6 +294,52 @@ final class BlockManagerTest extends TestCase
     {
         self::assertSame(InMemoryStorage::class, $this->manager()->backendClass());
         self::assertTrue($this->manager()->isQueryable());
+    }
+
+    public function testAHealthyBackendHasNoGapToReport(): void
+    {
+        self::assertNull($this->manager()->enumerationGap());
+        self::assertNull($this->manager(GappyStorage::class)->enumerationGap(), 'implementing the interface is not the same as having lost anything');
+    }
+
+    public function testAnIndexThatHasLostPartOfItselfSaysWhy(): void
+    {
+        $blocks = $this->manager(GappyStorage::class, ['gap' => 'the index could not be read: shard 3 is gone']);
+
+        self::assertSame('the index could not be read: shard 3 is gone', $blocks->enumerationGap());
+    }
+
+    public function testOneAddressIsLiftedByKeyWhenTheIndexHasLostIt(): void
+    {
+        // The case the gap exists for: the record is there, the index does
+        // not point at it, and a match would report "nothing lifted" while
+        // the customer stays blocked. By key, it cannot miss.
+        $blocks = $this->manager(GappyStorage::class, [
+            'gap' => 'the index could not be read: shard 3 is gone',
+            'lost' => ['198.51.100.9'],
+        ]);
+        $blocks->add('198.51.100.9', 600);
+
+        self::assertSame([], $blocks->all(), 'the index cannot see it');
+        self::assertSame(1, $blocks->remove('198.51.100.9', dryRun: true));
+        self::assertNotNull($blocks->lookup('198.51.100.9'), 'a dry run removes nothing');
+        self::assertSame(1, $blocks->remove('198.51.100.9'));
+        self::assertNull($blocks->lookup('198.51.100.9'));
+    }
+
+    public function testARangeCanOnlyLiftWhatTheIndexCanStillSee(): void
+    {
+        // Which is why the command has to say so: the count is true, and it
+        // is not everything.
+        $blocks = $this->manager(GappyStorage::class, [
+            'gap' => 'the index could not be read: shard 3 is gone',
+            'lost' => ['198.51.100.9'],
+        ]);
+        $blocks->add('198.51.100.9', 600);
+        $blocks->add('198.51.100.10', 600);
+
+        self::assertSame(1, $blocks->remove('198.51.100.0/24'));
+        self::assertNotNull($blocks->lookup('198.51.100.9'), 'still blocked');
     }
 
     public function testRecordFieldsAreReadFromWhereTheyActuallyLive(): void

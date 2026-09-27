@@ -110,6 +110,13 @@ final class UnblockCommand extends AbstractFirewallCommand
             $lifted = $all
                 ? $this->blockManager->clear($dryRun)
                 : $this->blockManager->remove($pattern, $dryRun);
+
+            // Asked only of the operations that matched through the index.
+            // One address is lifted by key, which no gap can make miss, so
+            // qualifying that answer would be a warning about nothing.
+            $gap = $all || filter_var($pattern, FILTER_VALIDATE_IP) === false
+                ? $this->blockManager->enumerationGap()
+                : null;
         } catch (FirewallException $firewallException) {
             $symfonyStyle->error($firewallException->getMessage());
 
@@ -121,9 +128,21 @@ final class UnblockCommand extends AbstractFirewallCommand
             // answer to "is this address blocked?", and exiting non-zero
             // would make a deploy step that lifts an address defensively
             // fail once the address is no longer listed.
-            $symfonyStyle->success($all
-                ? 'The block list is already empty.'
-                : sprintf('Nothing in the block list matches %s.', $pattern));
+            //
+            // Unless it is not complete, in which case it is not said. "The
+            // block list is already empty" from an index that has lost half
+            // of itself is the false confidence the gap exists to prevent.
+            if ($gap === null) {
+                $symfonyStyle->success($all
+                    ? 'The block list is already empty.'
+                    : sprintf('Nothing in the block list matches %s.', $pattern));
+            } else {
+                $symfonyStyle->writeln($all
+                    ? ' Nothing the block list could see is blocked.'
+                    : sprintf(' Nothing the block list could see matches %s.', $pattern));
+            }
+
+            $this->reportGap($symfonyStyle, $gap, $dryRun);
 
             return self::EXIT_OK;
         }
@@ -136,11 +155,40 @@ final class UnblockCommand extends AbstractFirewallCommand
             $all ? '' : sprintf(' matching %s', $pattern)
         ));
 
+        $this->reportGap($symfonyStyle, $gap, $dryRun);
+
         if ($dryRun) {
             $symfonyStyle->warning('Dry run — nothing was changed.');
         }
 
         return self::EXIT_OK;
+    }
+
+    /**
+     * Say that a count may be short, and what is still in force because of it.
+     *
+     * The exit code is left alone. The same answer from `bin/firewall-block`
+     * is a warning and a zero, and the lift that did happen did happen; what
+     * an operator needs is to know it was not everything, which a warning
+     * says and an exit code cannot.
+     *
+     * @param string|null $gap
+     *   `BlockManager::enumerationGap()`, NULL when there is nothing to say.
+     * @param bool $dryRun
+     *   Whether nothing was lifted anyway.
+     */
+    private function reportGap(SymfonyStyle $symfonyStyle, ?string $gap, bool $dryRun): void
+    {
+        if ($gap === null) {
+            return;
+        }
+
+        $symfonyStyle->warning(sprintf(
+            'Results may be incomplete: %s. A block the index has lost was not %s, and is still in '
+            . 'force. One address can still be lifted by name, which does not depend on the index.',
+            $gap,
+            $dryRun ? 'counted' : 'lifted'
+        ));
     }
 
     /**

@@ -177,6 +177,15 @@ final class BlockManager
             return $this->removeExact(trim($pattern), $dryRun);
         }
 
+        // An index that has lost part of itself can miss this address in a
+        // match, and the record is still there to be deleted by key. So one
+        // address goes the way that cannot miss, and the gap is left to
+        // qualify only the answers it can actually make wrong: ranges and
+        // `--all`.
+        if ($this->enumerationGap() !== null && filter_var(trim($pattern), FILTER_VALIDATE_IP) !== false) {
+            return $this->removeExact(trim($pattern), $dryRun);
+        }
+
         if ($dryRun) {
             return count($this->blockList->find($pattern));
         }
@@ -428,6 +437,34 @@ final class BlockManager
     public function isQueryable(): bool
     {
         return $this->blockList->backend()['queryable'];
+    }
+
+    /**
+     * Why a listing, a range match or a count may currently be missing blocks.
+     *
+     * A backend that answers from its own index rather than from the
+     * keyspace — `MemcachedStorage`, which cannot list its keys at all — can
+     * lose part of that index without losing the records it points at. Its
+     * answers are then true and incomplete: "nothing in this range" means
+     * "nothing in the part of the index that survived", and `clear()`
+     * leaves behind every block it could not see while reporting how many
+     * it lifted.
+     *
+     * `bin/firewall-block` already says so. The native commands did not,
+     * which made them the more confident of the two in exactly the case
+     * where confidence is wrong (#4).
+     *
+     * Exact-address reads are unaffected — the backend answers those from
+     * the record — which is why `lookup()` and a one-address `remove()`
+     * carry no such qualification.
+     *
+     * @return string|null
+     *   The backend's own explanation, a sentence fragment such as "the
+     *   index could not be read: …", or NULL when every block is reachable.
+     */
+    public function enumerationGap(): ?string
+    {
+        return $this->blockList->backend()['gap'];
     }
 
     /**

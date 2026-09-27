@@ -19,6 +19,7 @@ use Kanopi\FirewallBundle\Firewall\FirewallFactory;
 use Kanopi\FirewallBundle\Firewall\LoggerBridge;
 use Kanopi\FirewallBundle\Firewall\ProxyPosture;
 use Kanopi\FirewallBundle\Firewall\StatusReport;
+use Kanopi\FirewallBundle\Tests\Fixtures\GappyStorage;
 use Kanopi\FirewallBundle\Tests\Fixtures\OpaqueStorage;
 use Kanopi\FirewallBundle\Tests\Fixtures\ReadsStructuredOutput;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -160,6 +161,36 @@ final class StatusReportTest extends TestCase
 
         self::assertFalse($report['storage_queryable']);
         self::assertSame('cannot be listed', $report['blocks_in_force']);
+    }
+
+    public function testACountFromAnIndexWithAGapSaysItIsAFloor(): void
+    {
+        $configs = [[
+            'global' => ['behind_proxy' => false],
+            'storage' => ['type' => GappyStorage::class, 'config' => [
+                'gap' => 'the index could not be read: shard 3 is gone',
+                'lost' => ['198.51.100.9'],
+            ]],
+            'logger' => ['handlers' => [['class' => 'Monolog\Handler\NullHandler']]],
+            'plugins' => [],
+        ]];
+
+        $blocks = new BlockManager(new BlockList($configs));
+        $blocks->add('198.51.100.9', 600);
+        $blocks->add('198.51.100.10', 600);
+
+        $report = $this->report($configs, blockManager: $blocks)->toArray();
+
+        self::assertSame(1, $report['blocks_in_force'], 'still an integer, so a script reading it keeps working');
+        self::assertSame('the index could not be read: shard 3 is gone', $report['blocks_may_be_incomplete']);
+    }
+
+    public function testACompleteCountSaysNothingAboutAGap(): void
+    {
+        $report = $this->report([self::CONFIG . 'block.yml'])->toArray();
+
+        self::assertArrayHasKey('blocks_may_be_incomplete', $report, 'present either way, so the JSON shape is stable');
+        self::assertNull($report['blocks_may_be_incomplete']);
     }
 
     public function testABlockThatIsInForceIsCounted(): void

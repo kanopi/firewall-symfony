@@ -35,10 +35,21 @@ All notable changes to this project are documented here. The format follows
   Found by writing QUICKSTART.md and checking that its "read the log" step actually works.
 - A tarpitted request no longer reads as "not evaluated" in the profiler. The decision
   recorder subscribes by class, and `RequestTarpitted` was not on its list.
+- **The native block commands answered with confidence they did not have** (#4). A block
+  list that searches from an index of its own — kanopi/firewall 2.33.0's `MemcachedStorage`
+  — can lose part of that index and keep the records, and says so through
+  `BlockList::backend()['gap']`. `bin/firewall-block` warned; the bundle's commands did not.
+  `kanopi:firewall:unblock` with a range or `--all` now warns that what it lifted or counted
+  may not be everything and that the rest is still in force, and no longer says "already
+  empty" or "nothing matches" when it cannot know. `kanopi:firewall:find-reference` warns
+  that a miss may be a block still in force. `kanopi:firewall:status` gains
+  `blocks_may_be_incomplete`, NULL when the count is complete. One address is now lifted by
+  key when the index has a gap, which cannot miss.
 
 ### Changed
 
-- `kanopi/firewall` requires `^2.30`, up from `^2.26`.
+- `kanopi/firewall` requires `^2.33`, up from `^2.26`: 2.30 for the tarpit event, 2.33 for
+  the block list's `gap`.
 
 ## [1.0.0] — 2026-09-12
 
