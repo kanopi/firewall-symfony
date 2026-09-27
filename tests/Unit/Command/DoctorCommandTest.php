@@ -21,6 +21,7 @@ use Kanopi\FirewallBundle\Tests\Fixtures\ReadsStructuredOutput;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Console\Tester\CommandTester;
+use Symfony\Component\Filesystem\Filesystem;
 
 #[CoversClass(DoctorCommand::class)]
 final class DoctorCommandTest extends TestCase
@@ -121,12 +122,17 @@ final class DoctorCommandTest extends TestCase
 
     public function testEverythingFineAndQuietSaysSoRatherThanPrintingNothing(): void
     {
-        // An empty report reads as a command that did not run.
+        // An empty report reads as a command that did not run. The block
+        // list is kept under the project — the temp directory is itself a
+        // finding — in /var/, which this repository ignores.
+        $directory = dirname(__DIR__, 3) . '/var/doctor-test';
+        (new Filesystem())->mkdir($directory);
+
         $tester = $this->tester(configs: [[
             'global' => ['behind_proxy' => false],
             'storage' => [
                 'type' => 'Kanopi\Firewall\Storage\FileStorage',
-                'config' => ['storage_file' => sys_get_temp_dir() . '/kanopi-doctor-test-blocks.json'],
+                'config' => ['storage_file' => $directory . '/blocks.json'],
             ],
             'logger' => ['handlers' => [['class' => 'Monolog\Handler\NullHandler']]],
             'plugins' => [
@@ -134,7 +140,11 @@ final class DoctorCommandTest extends TestCase
             ],
         ]]);
 
-        $tester->execute(['--integration-only' => true, '--quiet-checks' => true]);
+        try {
+            $tester->execute(['--integration-only' => true, '--quiet-checks' => true]);
+        } finally {
+            (new Filesystem())->remove($directory);
+        }
 
         self::assertStringContainsString('Nothing to report', $tester->getDisplay());
     }

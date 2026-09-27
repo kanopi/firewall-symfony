@@ -132,7 +132,8 @@ final class TestKernel extends Kernel
             ->alias('test.kanopi_firewall.challenge_config_resolver', 'kanopi_firewall.challenge_config_resolver')->public()
             ->alias('test.kanopi_firewall.response_factory', 'kanopi_firewall.response_factory')->public()
             ->alias('test.kanopi_firewall.request_listener', 'kanopi_firewall.request_listener')->public()
-            ->alias('test.kanopi_firewall.proxy_posture', 'kanopi_firewall.proxy_posture')->public();
+            ->alias('test.kanopi_firewall.proxy_posture', 'kanopi_firewall.proxy_posture')->public()
+            ->alias('test.kanopi_firewall.block_manager', 'kanopi_firewall.block_manager')->public();
 
         // Only present in debug, which is what testTheProfilerPanelIsAbsentOutsideDebug
         // asserts — so the alias has to be conditional too.

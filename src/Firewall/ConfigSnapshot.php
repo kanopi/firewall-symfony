@@ -253,6 +253,19 @@ final class ConfigSnapshot
     }
 
     /**
+     * Where FileStorage will keep the block list, as the merged
+     * configuration says, or NULL when it names no file.
+     */
+    public function storageFile(): ?string
+    {
+        $storage = $this->all()['storage'] ?? null;
+        $config = is_array($storage) ? ($storage['config'] ?? null) : null;
+        $file = is_array($config) ? ($config['storage_file'] ?? null) : null;
+
+        return is_string($file) && $file !== '' ? $file : null;
+    }
+
+    /**
      * One `plugins:` entry, flattened for display.
      *
      * @param array<array-key, mixed> $plugin

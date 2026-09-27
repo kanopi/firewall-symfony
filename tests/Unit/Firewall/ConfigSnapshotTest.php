@@ -208,6 +208,40 @@ final class ConfigSnapshotTest extends TestCase
         self::assertSame('block', $snapshot->libraryMode(), 'the library\'s own default');
     }
 
+    public function testTheStorageFileIsTheOneTheLastInputNames(): void
+    {
+        // The bundle's storage_file is appended as the last input, so it is
+        // what the merge ends on.
+        $snapshot = new ConfigSnapshot([
+            ['storage' => ['type' => 'FileStorage', 'config' => ['storage_file' => '/tmp/firewall-blocked.data']]],
+            ['storage' => ['config' => ['storage_file' => '/srv/app/var/firewall/blocked.data']]],
+        ], []);
+
+        self::assertSame('/srv/app/var/firewall/blocked.data', $snapshot->storageFile());
+    }
+
+    /**
+     * @return iterable<string, array{0: array<string, mixed>}>
+     */
+    public static function provideNoStorageFile(): iterable
+    {
+        yield 'no storage section' => [['plugins' => []]];
+        yield 'storage that is not a map' => [['storage' => 'file']];
+        yield 'no config under it' => [['storage' => ['type' => 'FileStorage']]];
+        yield 'a config that is not a map' => [['storage' => ['config' => 'nope']]];
+        yield 'an empty path' => [['storage' => ['config' => ['storage_file' => '']]]];
+        yield 'a path that is not a string' => [['storage' => ['config' => ['storage_file' => 7]]]];
+    }
+
+    /**
+     * @param array<string, mixed> $config
+     */
+    #[DataProvider('provideNoStorageFile')]
+    public function testEveryWayOfNamingNoFileIsNull(array $config): void
+    {
+        self::assertNull((new ConfigSnapshot([$config], []))->storageFile());
+    }
+
     public function testTrustedProxiesAreReadAsTheLibraryReadsThem(): void
     {
         $snapshot = new ConfigSnapshot([['global' => ['trusted_proxies' => ['10.0.0.0/8', 'REMOTE_ADDR']]]], []);

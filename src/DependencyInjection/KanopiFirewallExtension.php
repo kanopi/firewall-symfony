@@ -185,6 +185,15 @@ final class KanopiFirewallExtension extends Extension implements PrependExtensio
             $inputs[] = $config['settings'];
         }
 
+        // An input rather than an override, because the native block
+        // commands' BlockList is built from the inputs alone. As an override
+        // the site would write one file and `kanopi:firewall:unblock` read
+        // another. Last, because it is the most specific statement there is:
+        // the YAML's `%env(default:/tmp/…)%` is exactly what it replaces.
+        if ($config['storage_file'] !== null) {
+            $inputs[] = ['storage' => ['config' => ['storage_file' => $config['storage_file']]]];
+        }
+
         return $inputs;
     }
 

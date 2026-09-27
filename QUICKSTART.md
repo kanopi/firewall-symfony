@@ -61,21 +61,18 @@ which pulls in the two platform-neutral presets — `malicious-requests.yml` and
 **Read the file it writes.** It is commented throughout and every value in it is meant to
 be edited.
 
-One edit to make now, in `config/firewall.yml`:
-
-```yaml
-storage:
-  type: Kanopi\Firewall\Storage\FileStorage
-  config:
-    storage_file: ../var/firewall-blocks.json
-```
-
-The generated default writes to `/tmp`, which works immediately and does not survive a
-reboot. A **relative path resolves against the directory of the file that declares it**, so
-`../var/…` from `config/firewall.yml` lands in your application's `var/`. The file is
-created `0600`.
+With file storage it also says where the block list lives, which the YAML alone can't get
+right: it adds `FIREWALL_STORAGE_FILE="%kernel.project_dir%/var/firewall/blocked.data"` to
+`.env`, creates `var/firewall/`, and sets `kanopi_firewall.storage_file` in
+`config/packages/kanopi_firewall.yaml`, writing that file if you don't have one yet. Without
+this, the generated default puts blocks in `/tmp`, which doesn't survive a reboot. Anything
+already set is left alone, and the command prints what it did. See the README's "Where the
+block list lives" for why it takes all three.
 
 ## 3. Point the bundle at it
+
+If step 2 wrote `config/packages/kanopi_firewall.yaml`, it already lists the file and the
+storage path, so add `mode: observe`. Otherwise, write it:
 
 ```yaml
 # config/packages/kanopi_firewall.yaml
@@ -83,6 +80,7 @@ kanopi_firewall:
     mode: observe
     config_files:
         - '%kernel.project_dir%/config/firewall.yml'
+    storage_file: '%env(resolve:FIREWALL_STORAGE_FILE)%'
 ```
 
 ```bash
