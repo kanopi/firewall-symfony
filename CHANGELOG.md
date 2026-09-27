@@ -8,6 +8,12 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- `kanopi:firewall:challenge` (`kfw:challenge`), wrapping kanopi/firewall 2.30.0's
+  `bin/firewall-challenge`: inspect a pass, revoke one by token or by nonce, check a nonce,
+  and restore it. Before this, withdrawing one pass on a Symfony site meant running the vendor
+  script by hand against a configuration that lacked the secret, or rotating
+  `challenge.secret` and re-challenging everyone. Exactly one action is required, and checked
+  before the effective configuration — secret included — is written to a temporary file.
 - The profiler panel reports tarpit decisions (kanopi/firewall 2.30.0): `tarpitted` when
   the request was held, `tarpit full` when the cap was reached and it was served at once,
   plus the seconds held, the holds in flight, and the rule that asked.

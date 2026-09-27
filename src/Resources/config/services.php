@@ -15,6 +15,7 @@ use Composer\InstalledVersions;
 use Kanopi\Firewall\Utility\BlockList;
 use Kanopi\FirewallBundle\Command\BlockCommand;
 use Kanopi\FirewallBundle\Command\BlocksCommand;
+use Kanopi\FirewallBundle\Command\ChallengeCommand;
 use Kanopi\FirewallBundle\Command\CheckCommand;
 use Kanopi\FirewallBundle\Command\ConfigCommand;
 use Kanopi\FirewallBundle\Command\DoctorCommand;
@@ -232,6 +233,7 @@ return static function (ContainerConfigurator $containerConfigurator): void {
     $scriptCommands = [
         'check' => CheckCommand::class,
         'blocks' => BlocksCommand::class,
+        'challenge' => ChallengeCommand::class,
         'rule' => RuleCommand::class,
         'sources' => SourcesCommand::class,
         'migrate' => MigrateCommand::class,

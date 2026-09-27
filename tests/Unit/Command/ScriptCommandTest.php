@@ -13,6 +13,7 @@ namespace Kanopi\FirewallBundle\Tests\Unit\Command;
 
 use Kanopi\FirewallBundle\Command\AbstractScriptCommand;
 use Kanopi\FirewallBundle\Command\BlocksCommand;
+use Kanopi\FirewallBundle\Command\ChallengeCommand;
 use Kanopi\FirewallBundle\Command\CheckCommand;
 use Kanopi\FirewallBundle\Command\EffectiveConfig;
 use Kanopi\FirewallBundle\Command\InitCommand;
@@ -29,6 +30,7 @@ use Symfony\Component\Console\Tester\CommandTester;
 
 #[CoversClass(AbstractScriptCommand::class)]
 #[CoversClass(BlocksCommand::class)]
+#[CoversClass(ChallengeCommand::class)]
 #[CoversClass(CheckCommand::class)]
 #[CoversClass(InitCommand::class)]
 #[CoversClass(LogPruneCommand::class)]
@@ -283,6 +285,78 @@ final class ScriptCommandTest extends TestCase
         $tester->execute(['--days' => '30', '--dry-run' => true]);
 
         self::assertStringContainsString('ARGS:--dry-run|--days=30|/etc/firewall.yml', $tester->getDisplay());
+    }
+
+    public function testEveryChallengeOptionReachesTheScript(): void
+    {
+        $tester = $this->tester(new ChallengeCommand(...$this->collaborators(['/etc/firewall.yml'])));
+
+        $tester->execute([
+            '--revoke-nonce' => 'abc123',
+            '--expires' => '1893456000',
+            '--reason' => 'Shared in a ticket',
+            '--json' => true,
+        ]);
+
+        self::assertStringContainsString(
+            'ARGS:--json|--revoke-nonce=abc123|--expires=1893456000|--reason=Shared in a ticket|/etc/firewall.yml',
+            $tester->getDisplay()
+        );
+    }
+
+    public function testTheChallengeCommandSeesTheSecretTheListenerSignsWith(): void
+    {
+        // A pass only decodes against the secret that signed it, and that
+        // secret is usually bundle config. The YAML alone would report every
+        // real pass as "not signed by this configuration".
+        $tester = $this->tester(new ChallengeCommand(...$this->collaborators(
+            ['/etc/firewall.yml'],
+            ['[challenge][secret]' => 's3cret']
+        )));
+
+        $tester->execute(['--inspect' => 'TOKEN']);
+
+        self::assertMatchesRegularExpression(
+            '#ARGS:--inspect=TOKEN\|/etc/firewall\.yml\|\S+#',
+            $tester->getDisplay(),
+            'the real file, then the overrides'
+        );
+    }
+
+    public function testNoChallengeActionIsRefusedBeforeTheScriptRuns(): void
+    {
+        $before = $this->tempFileCount();
+        $tester = $this->tester(new ChallengeCommand(...$this->collaborators(
+            ['/etc/firewall.yml'],
+            ['[challenge][secret]' => 's3cret']
+        )));
+
+        self::assertSame(2, $tester->execute(['--reason' => 'no action given']));
+        self::assertStringContainsString('Nothing to do', $tester->getDisplay());
+        self::assertStringNotContainsString('ARGS:', $tester->getDisplay(), 'the script never ran');
+        self::assertSame($before, $this->tempFileCount(), 'and no config carrying the secret was written');
+    }
+
+    public function testTwoChallengeActionsAreRefusedRatherThanOrderedForTheOperator(): void
+    {
+        // `--revoke` and `--restore` together is somebody midway through
+        // changing their mind. Picking an order for them is how the wrong one
+        // ends up being the one that ran.
+        $tester = $this->tester(new ChallengeCommand(...$this->collaborators(['/etc/firewall.yml'])));
+
+        self::assertSame(2, $tester->execute(['--revoke' => 'TOKEN', '--restore' => 'abc123']));
+        self::assertStringContainsString('--revoke and --restore', $tester->getDisplay());
+        self::assertStringNotContainsString('ARGS:', $tester->getDisplay());
+    }
+
+    public function testAChallengeActionThroughTheEscapeHatchIsLeftToTheScript(): void
+    {
+        // The passthrough exists for options this bundle has not declared
+        // yet; counting only the declared ones would refuse it.
+        $tester = $this->tester(new ChallengeCommand(...$this->collaborators(['/etc/firewall.yml'])));
+
+        self::assertSame(0, $tester->execute(['forward' => ['--status=abc123']]));
+        self::assertStringContainsString('ARGS:--status=abc123|/etc/firewall.yml', $tester->getDisplay());
     }
 
     public function testTheTemporaryFilesAreGoneAfterwards(): void

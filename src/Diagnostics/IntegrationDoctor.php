@@ -454,7 +454,7 @@ final class IntegrationDoctor
             'The library\'s bin/ scripts are not where the bundle expects',
             sprintf(
                 'Nothing at %s/firewall-doctor, so every wrapped command — doctor, check, blocks, '
-                . 'rule, sources, migrate, log-prune, init — will refuse to run. Set '
+                . 'challenge, rule, sources, migrate, log-prune, init — will refuse to run. Set '
                 . 'kanopi_firewall.commands.bin_dir if Composer\'s bin-dir is somewhere else.',
                 $this->binDir
             )
