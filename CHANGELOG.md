@@ -6,8 +6,15 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [1.1.0] — 2026-09-27
+
 ### Added
 
+- `QUICKSTART.md`: from `composer require` to enforcing in eight steps — install, write a
+  configuration, check it, observe for a week, tell it about the proxy, enforce, wire it into
+  the deploy — plus what to do the day somebody says "I'm blocked".
 - `kanopi:firewall:challenge` (`kfw:challenge`), wrapping kanopi/firewall 2.30.0's
   `bin/firewall-challenge`: inspect a pass, revoke one by token or by nonce, check a nonce,
   and restore it. Before this, withdrawing one pass on a Symfony site meant running the vendor
@@ -20,17 +27,6 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
-- **The profiler said "allowed" for every marked, recorded and tarpitted request** (#9).
-  Those three are non-terminal: the library announces them and carries on, and a request
-  nothing else matches ends in a default `RequestAllowed`. The decision recorder kept only
-  the last event, so the default allow replaced the decision that mattered. Every panel test
-  recorded a single event by hand, so nothing failed. The recorder now keeps every decision
-  and looks past a trailing default allow. The mark and the hold survive a block that follows
-  them, so a slow block shows both.
-- Those same three no longer read as "(observed only)" in enforce mode. `isEnforced()` is
-  always false for them because nothing was refused, and the panel took that to mean
-  observe mode. A tarpit in observe mode now reads `tarpitted (observed only)` rather than
-  `tarpit full`.
 - **Every firewall log line was discarded.** `logging.mode: replace` — the default — wired
   the bridge to `service('monolog.logger.%kanopi_firewall.logging.channel%')`, and a
   parameter placeholder inside a *service id* is not resolved before invalid references are
@@ -44,6 +40,17 @@ All notable changes to this project are documented here. The format follows
   cover it, all of which fail against the old wiring — including one that follows a real
   blocked request into a real Monolog handler, which is the assertion this suite never had.
   Found by writing QUICKSTART.md and checking that its "read the log" step actually works.
+- **The profiler said "allowed" for every marked, recorded and tarpitted request** (#9).
+  Those three are non-terminal: the library announces them and carries on, and a request
+  nothing else matches ends in a default `RequestAllowed`. The decision recorder kept only
+  the last event, so the default allow replaced the decision that mattered. Every panel test
+  recorded a single event by hand, so nothing failed. The recorder now keeps every decision
+  and looks past a trailing default allow. The mark and the hold survive a block that follows
+  them, so a slow block shows both.
+- Those same three no longer read as "(observed only)" in enforce mode. `isEnforced()` is
+  always false for them because nothing was refused, and the panel took that to mean
+  observe mode. A tarpit in observe mode now reads `tarpitted (observed only)` rather than
+  `tarpit full`.
 - A tarpitted request no longer reads as "not evaluated" in the profiler. The decision
   recorder subscribes by class, and `RequestTarpitted` was not on its list.
 - **The native block commands answered with confidence they did not have** (#4). A block
@@ -205,5 +212,6 @@ All notable changes to this project are documented here. The format follows
   line — while analysing clean on 7.4 and 8.1, which is why nobody would have noticed
   without a Symfony axis in CI.
 
-[Unreleased]: https://github.com/kanopi/firewall-symfony/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/kanopi/firewall-symfony/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/kanopi/firewall-symfony/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/kanopi/firewall-symfony/releases/tag/v1.0.0
