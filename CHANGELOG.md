@@ -56,11 +56,20 @@ All notable changes to this project are documented here. The format follows
   that a miss may be a block still in force. `kanopi:firewall:status` gains
   `blocks_may_be_incomplete`, NULL when the count is complete. One address is now lifted by
   key when the index has a gap, which cannot miss.
+- `kanopi:firewall:doctor` no longer reports "Nothing says whether this is behind a proxy"
+  when the proxies are named in the firewall's own YAML. kanopi/firewall 2.33.0 accepts
+  `global.trusted_proxies` there and counts it as an answer, so the doctor does too, and says
+  what it means in Symfony: the library applies them for the firewall's own reads only, so
+  controllers, logs and the profiler still see the proxy, and `framework.trusted_proxies` is
+  the setting that answers for the whole application. When both are set it warns that
+  `global.trusted_proxies` is ignored, because the library uses the host's proxies and a
+  list that looks like it does something invites the next CDN range to be added there.
 
 ### Changed
 
 - `kanopi/firewall` requires `^2.33`, up from `^2.26`: 2.30 for the tarpit event, 2.33 for
-  the block list's `gap`.
+  the block list's `gap` and for `global.trusted_proxies`, which the doctor's proxy advice
+  depends on — on an earlier release that key does nothing.
 
 ## [1.0.0] — 2026-09-12
 

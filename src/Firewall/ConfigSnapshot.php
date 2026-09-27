@@ -214,6 +214,34 @@ final class ConfigSnapshot
     }
 
     /**
+     * The proxies `global.trusted_proxies` declares, or an empty list.
+     *
+     * Read the way the library reads it (`TrustedProxies::fromGlobal()`): a
+     * single string is one entry, and NULL, an empty list and an empty
+     * string all mean "none declared". Entries are not validated here — a
+     * malformed one is a startup failure the library reports in its own
+     * words, and repeating that check would only give two answers to disagree.
+     *
+     * @return array<int, string>
+     *   The declared entries, as written: addresses, CIDR ranges, or the
+     *   `REMOTE_ADDR` and `PRIVATE_SUBNETS` keywords.
+     */
+    public function trustedProxies(): array
+    {
+        $global = $this->all()['global'] ?? null;
+        $declared = is_array($global) ? ($global['trusted_proxies'] ?? null) : null;
+
+        if (in_array($declared, [null, [], ''], true)) {
+            return [];
+        }
+
+        return array_values(array_map(
+            static fn (mixed $proxy): string => is_scalar($proxy) ? (string) $proxy : get_debug_type($proxy),
+            is_array($declared) ? $declared : [$declared]
+        ));
+    }
+
+    /**
      * The configured storage class, or an empty string when none is set.
      */
     public function storageType(): string
