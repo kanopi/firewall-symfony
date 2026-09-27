@@ -259,9 +259,9 @@ an error template is HTML by definition — though the original exception is cha
 
 ## What a matched rule can do
 
-Six answers, and the bundle turns each into a response. The first three are the library's
-originals; `record`, `redirect` and `mark` arrived in kanopi/firewall 2.26.0, which is why
-this bundle requires `^2.26`.
+Seven answers, and the bundle turns each into a response. The first three are the library's
+originals; `record`, `redirect` and `mark` arrived in kanopi/firewall 2.26.0, and `tarpit`
+in 2.30.0.
 
 | `response:` | Refuses this request | Writes to the block list | The bundle returns |
 |---|---|---|---|
@@ -271,6 +271,7 @@ this bundle requires `^2.26`.
 | `record` | — | ✅ | nothing; the **next** request from that client is refused |
 | `redirect` | terminal | — | 302–307 to the rule's destination, `no-store` |
 | `mark` | — | — | nothing; the request carries a mark for your code |
+| `tarpit` | — | — | nothing, a few seconds late; the request then continues |
 
 `record` is what a honeypot needs: refusing the fetch of `/.env` tells a scanner exactly
 which URL is wired. `redirect` is a signpost rather than a ban — a notice page, a contact
@@ -283,8 +284,47 @@ if (in_array('needs-captcha', $request->attributes->get('firewall.marks', []), t
 }
 ```
 
-All six show up in the profiler panel with their own verdict, and a redirect names its
+All seven show up in the profiler panel with their own verdict, and a redirect names its
 destination there — "redirected" without one tells an operator nothing.
+
+### Tarpit
+
+`tarpit` holds the request still, then lets it carry on. It costs a scraper or a slow
+credential-stuffing run throughput without refusing anybody:
+
+```yaml
+tarpit:
+  max_concurrent: 5     # holds at once, across every tarpit rule
+  max_seconds: 30       # ceiling on any single hold
+
+plugins:
+  - plugin: "Kanopi\\Firewall\\Plugins\\UserAgent"
+    response: tarpit
+    metadata: { name: slow-the-scrapers, tarpit_seconds: 5 }
+    config: ["user_agent@contains:python-requests"]
+```
+
+**A hold occupies a PHP worker for its whole duration**, and that worker is exactly what an
+attacker can spend on purpose. That's why the cap is there, and what it does when it's full
+matters:
+
+- **At capacity, the request is served at once instead of held.** Under attack, the tarpit
+  stops tarpitting rather than taking the site down. The panel tells the two apart:
+  `tarpitted` for a hold, and `tarpit full` for a request served because the cap was reached.
+  The number of holds in flight is shown next to it.
+- **The library refuses to start a tarpit rule without a backend that counts holds
+  atomically.** `FileStorage` (per host, which is the right scope, since workers are per
+  host) and `RedisStorage` can. `InMemoryStorage` can't, so a tarpit rule on it is a
+  startup failure. Under `on_startup_failure: fail_open`, that means the whole firewall is
+  off, not just the tarpit.
+- **In `observe` mode nothing is held.** The rule is logged, and the panel reads
+  `tarpitted (observed only)`.
+- **It isn't a refusal, so it composes.** A tarpit and a block matching the same client make
+  a slow block. The panel shows `blocked` with the hold beside it. A client already on the
+  block list is refused without being held.
+
+If a CDN, a load balancer or nginx's `limit_req` sits in front of the site, that's usually a
+better place for the delay: none of them spends a PHP worker to do it.
 
 **Lockdown** (`global.lockdown`) refuses everybody but `lockdown_allow`, records nobody,
 and answers 503 with `Retry-After` — which the bundle sets on the response, because a CDN
