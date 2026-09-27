@@ -22,7 +22,7 @@ use Symfony\Component\Process\Process;
  *
  * ## Why a subprocess and not a reimplementation
  *
- * The eight scripts are between 150 and 640 lines of argument parsing,
+ * The nine scripts are between 150 and 640 lines of argument parsing,
  * output formatting and exit-code policy, and most of it is not reachable
  * through a public class — `firewall-check`'s whole reason for existing is
  * the three ways hand-assembling the same call fails quietly. Rewriting them

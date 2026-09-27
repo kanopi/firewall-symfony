@@ -337,6 +337,7 @@ final class KernelIntegrationTest extends TestCase
         yield 'doctor' => ['doctor'];
         yield 'check' => ['check'];
         yield 'blocks' => ['blocks'];
+        yield 'challenge' => ['challenge'];
         yield 'rule' => ['rule'];
         yield 'sources' => ['sources'];
         yield 'migrate' => ['migrate'];

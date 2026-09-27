@@ -327,7 +327,7 @@ incident that matters more than it looks.
 
 - **[README.md](README.md)** — configuration reference, the listener priority table, the
   challenge flow, decision events, and the profiler panel.
-- **`bin/console list kanopi`** — all fifteen commands. Each `--help` is written for an
+- **`bin/console list kanopi`** — all sixteen commands. Each `--help` is written for an
   operator, not as a syntax dump.
 - **Response actions beyond block/allow** — `record` serves the request and refuses the
   next one (what a honeypot needs), `redirect` sends a visitor to a notice page, `mark`

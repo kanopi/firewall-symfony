@@ -19,7 +19,7 @@ declare(strict_types=1);
  *
  * Required rather than duplicated by each stub, because the wrapper commands
  * ask for the script by name — `firewall-doctor`, `firewall-check` — and a
- * test cannot rename them. One behaviour, eight names.
+ * test cannot rename them. One behaviour, nine names.
  */
 $arguments = array_slice($argv, 1);
 

@@ -334,7 +334,7 @@ the refusal, the bundle's own renderer and the cache warmer that raised the refu
 
 ## Console commands
 
-Fifteen commands under `kanopi:firewall:`, each with a short `kfw:` alias. Eight wrap the
+Sixteen commands under `kanopi:firewall:`, each with a short `kfw:` alias. Nine wrap the
 library's shipped scripts; seven answer for themselves, because there is no script behind
 them.
 
@@ -420,6 +420,30 @@ Two asymmetries worth knowing, both deliberate: `block` refuses a CIDR range, be
 block is stored under one exact address and a range would sit in the list looking
 authoritative while matching no visitor ever (use `kanopi:firewall:rule add --ip=…` for
 that). `unblock` accepts one, because lifting matches against what is already stored.
+
+### Withdrawing a challenge pass
+
+A pass token is stateless and signed, so before kanopi/firewall 2.30.0 the only way to stop
+one being accepted was to rotate `challenge.secret` — re-challenging every visitor holding a
+pass to withdraw one. `kanopi:firewall:challenge` wraps `bin/firewall-challenge`, which keeps
+a revocation list in the configured storage instead.
+
+```bash
+bin/console kanopi:firewall:challenge --inspect=TOKEN      # address, provider, issued, expires, nonce
+bin/console kanopi:firewall:challenge --revoke=TOKEN --reason="Posted in a ticket"
+bin/console kanopi:firewall:challenge --revoke-nonce=NONCE # when a log line is what you have
+bin/console kanopi:firewall:challenge --status=NONCE
+bin/console kanopi:firewall:challenge --restore=NONCE
+```
+
+The token is the value of the `fw_challenge_pass` cookie (or whatever
+`kanopi_firewall.challenge.cookie_name` says), or of the challenge header. Give exactly one
+action; two are refused rather than run in an order nobody chose, and the refusal comes
+before the configuration is written anywhere. The command is handed the *effective*
+configuration, because a pass only decodes against the secret that signed it and that secret
+usually lives in `kanopi_firewall.challenge.secret`, not in the YAML. A revocation lasts until
+the pass would have expired anyway, and is only consulted while `challenge.revocable` is on;
+the output says when it is not, and when the storage backend will forget it.
 
 ### The rest
 
