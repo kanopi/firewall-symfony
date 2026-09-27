@@ -80,7 +80,7 @@ final class FirewallDataCollector extends DataCollector
 
         $this->data = [
             'verdict' => $this->verdict($decision),
-            'enforced' => $decision instanceof DecisionEvent ? $decision->isEnforced() : null,
+            'enforced' => $this->enforced($decision),
             'rule' => $this->rule($decision),
             'status_code' => $this->statusCode($decision),
             // Where a redirected visitor was sent, and what a marked request
@@ -88,10 +88,13 @@ final class FirewallDataCollector extends DataCollector
             // without them the panel would say "redirected" and leave an
             // operator to guess where to.
             'location' => $decision instanceof RequestRedirected ? $decision->getLocation() : null,
-            'mark' => $decision instanceof RequestMarked ? $decision->getMark() : null,
+            'mark' => $this->find(RequestMarked::class)?->getMark(),
             'provider' => $this->provider($decision),
             'reason' => $decision instanceof ChallengeFailed ? $decision->getReason() : null,
-            'tarpit' => $this->tarpit($decision),
+            // Both from every decision rather than the headline one: a
+            // request can be marked or held and then blocked, and the block
+            // is the verdict while the mark and the hold are still true.
+            'tarpit' => $this->tarpit($this->find(RequestTarpitted::class)),
             'mode' => null,
             'configured_mode' => null,
             'panic_switch' => null,
@@ -216,7 +219,11 @@ final class FirewallDataCollector extends DataCollector
             // Not "tarpitted" when the cap was full: the request was served
             // at once, and an operator watching an attack has to be able to
             // tell a tarpit working from a tarpit that has run out of room.
-            $decision instanceof RequestTarpitted => $decision->wasHeld() ? 'tarpitted' : 'tarpit full',
+            // In observe mode nothing is held and the event says so the
+            // same way a full cap does; `enforced` carries the difference.
+            $decision instanceof RequestTarpitted => $decision->wasHeld() || $this->mode === 'observe'
+                ? 'tarpitted'
+                : 'tarpit full',
             $decision instanceof RequestAllowed => $decision->wasBypassed() ? 'bypassed' : 'allowed',
             default => 'not evaluated',
         };
@@ -253,6 +260,52 @@ final class FirewallDataCollector extends DataCollector
             $decision instanceof ChallengeFailed => $decision->getProvider(),
             default => null,
         };
+    }
+
+    /**
+     * Whether the decision was applied, as the panel means it.
+     *
+     * `DecisionEvent::isEnforced()` answers a different question for the
+     * three non-terminal decisions: it is always FALSE for `mark`, `record`
+     * and `tarpit`, because nothing was refused. The panel reads FALSE as
+     * "observe mode, recorded not applied", so passing it through labelled
+     * every mark and hold in enforce mode "(observed only)". For those the
+     * answer comes from the mode instead, and is NULL — nothing to say —
+     * when the firewall is enforcing.
+     */
+    private function enforced(?DecisionEvent $decision): ?bool
+    {
+        if (!$decision instanceof DecisionEvent) {
+            return null;
+        }
+
+        if ($decision instanceof RequestMarked || $decision instanceof RequestRecorded || $decision instanceof RequestTarpitted) {
+            return $this->mode === 'observe' ? false : null;
+        }
+
+        return $decision->isEnforced();
+    }
+
+    /**
+     * The first decision of a given class announced for this request.
+     *
+     * @template T of DecisionEvent
+     *
+     * @param class-string<T> $class
+     *   The event class.
+     *
+     * @return T|null
+     *   NULL when none was announced.
+     */
+    private function find(string $class): ?DecisionEvent
+    {
+        foreach ($this->decisionRecorder->getDecisions() as $decision) {
+            if ($decision instanceof $class) {
+                return $decision;
+            }
+        }
+
+        return null;
     }
 
     /**

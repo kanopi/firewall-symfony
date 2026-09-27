@@ -1,0 +1,17 @@
+# A honeypot: the request is served, and the address is written to the block
+# list for next time. Non-terminal, like a mark.
+global:
+  behind_proxy: false
+storage:
+  type: Kanopi\Firewall\Storage\InMemoryStorage
+logger:
+  handlers:
+    - class: Monolog\Handler\NullHandler
+plugins:
+  - plugin: "Kanopi\\Firewall\\Plugins\\Url"
+    response: record
+    enable: true
+    metadata:
+      name: test-honeypot
+    config:
+      - "path:/.env"

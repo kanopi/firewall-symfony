@@ -1,0 +1,19 @@
+# A firewall that marks one address and refuses nobody. Non-terminal, so the
+# ladder carries on and ends in a default allow -- which is the case #9 is
+# about.
+global:
+  behind_proxy: false
+storage:
+  type: Kanopi\Firewall\Storage\InMemoryStorage
+logger:
+  handlers:
+    - class: Monolog\Handler\NullHandler
+plugins:
+  - plugin: "Kanopi\\Firewall\\Plugins\\IpAddress"
+    response: mark
+    enable: true
+    metadata:
+      name: test-mark-ip
+      mark_as: needs-captcha
+    config:
+      - 203.0.113.5

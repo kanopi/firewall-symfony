@@ -141,7 +141,53 @@ final class FirewallDataCollectorTest extends TestCase
         self::assertSame(['held' => true, 'seconds' => 5, 'in_flight' => 3], $data['tarpit']);
         self::assertSame(['name' => 'stub-rule', 'class' => StubPlugin::class], $data['rule']);
         self::assertNull($data['status_code'], 'nothing was answered with a status');
-        self::assertFalse($data['enforced'], 'nothing was refused');
+        self::assertNull($data['enforced'], 'a hold in enforce mode is not "observed only"');
+    }
+
+    public function testAMarkOrAHoldInEnforceModeIsNotReportedAsObservedOnly(): void
+    {
+        // `isEnforced()` is always FALSE for the non-terminal decisions —
+        // nothing was refused — and the panel reads FALSE as observe mode.
+        $decisions = [
+            new RequestMarked(Request::create('/'), new StubPlugin(), 'needs-captcha', 'firewall.marks'),
+            new RequestRecorded(Request::create('/'), new StubPlugin(), true),
+            new RequestTarpitted(Request::create('/'), new StubPlugin(), 5, true, 1),
+        ];
+
+        foreach ($decisions as $decision) {
+            $recorder = new DecisionRecorder();
+            $recorder->record($decision);
+
+            self::assertNull($this->collect($recorder)['enforced'], $decision::class);
+        }
+    }
+
+    public function testATarpitInObserveModeIsObservedRatherThanFull(): void
+    {
+        // The library announces an observed tarpit with `held: false`, which
+        // is exactly how it announces a full cap. The mode tells them apart.
+        $recorder = new DecisionRecorder();
+        $recorder->record(new RequestTarpitted(Request::create('/'), new StubPlugin(), 0, false, 0));
+
+        $data = $this->collect($recorder, mode: 'observe');
+
+        self::assertSame('tarpitted', $data['verdict']);
+        self::assertFalse($data['enforced']);
+    }
+
+    public function testAMarkAndAHoldSurviveTheBlockThatFollowedThem(): void
+    {
+        $recorder = new DecisionRecorder();
+        $recorder->record(new RequestMarked(Request::create('/'), new StubPlugin(), 'needs-captcha', 'firewall.marks'));
+        $recorder->record(new RequestTarpitted(Request::create('/'), new StubPlugin(), 5, true, 1));
+        $recorder->record(new RequestBlocked(Request::create('/'), new StubPlugin(), 403));
+
+        $data = $this->collect($recorder);
+
+        self::assertSame('blocked', $data['verdict'], 'the block is what the visitor got');
+        self::assertSame('needs-captcha', $data['mark']);
+        self::assertSame(['held' => true, 'seconds' => 5, 'in_flight' => 1], $data['tarpit'], 'a slow block');
+        self::assertTrue($data['enforced']);
     }
 
     public function testOnlyATarpitCarriesTarpitData(): void

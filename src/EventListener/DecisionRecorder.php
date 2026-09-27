@@ -50,9 +50,11 @@ use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 final class DecisionRecorder implements EventSubscriberInterface
 {
     /**
-     * The last decision announced, or NULL before one is.
+     * Every decision announced for the current request, in order.
+     *
+     * @var list<DecisionEvent>
      */
-    private ?DecisionEvent $decision = null;
+    private array $decisions = [];
 
     /**
      * {@inheritdoc}
@@ -87,12 +89,18 @@ final class DecisionRecorder implements EventSubscriberInterface
     /**
      * Record a decision.
      *
-     * Last one wins. A single `evaluate()` announces exactly one decision on
-     * every path it can return from, so there is nothing to accumulate.
+     * Kept, not replaced. Until kanopi/firewall 2.26.0 one `evaluate()`
+     * announced exactly one decision, and "last one wins" was the whole
+     * design. `mark`, `record` and `tarpit` made that false: they are
+     * non-terminal, so the ladder announces them and carries on — and a
+     * request nothing else matches then ends in a default `RequestAllowed`.
+     * Keeping only the last event let that allow overwrite the decision that
+     * mattered, and the panel said "allowed" for every marked, recorded and
+     * tarpitted request (#9).
      */
     public function record(DecisionEvent $decisionEvent): void
     {
-        $this->decision = $decisionEvent;
+        $this->decisions[] = $decisionEvent;
     }
 
     /**
@@ -107,11 +115,17 @@ final class DecisionRecorder implements EventSubscriberInterface
      */
     public function reset(): void
     {
-        $this->decision = null;
+        $this->decisions = [];
     }
 
     /**
-     * The decision recorded for this request.
+     * The decision that describes this request.
+     *
+     * The last one announced, except that a default allow following another
+     * decision adds nothing to it: "a rule marked this request, and then no
+     * rule refused it" is a marked request, not an allowed one. A terminal
+     * decision after a non-terminal one — a tarpit and then a block — is
+     * still the answer, because it is the one the visitor got.
      *
      * @return DecisionEvent|null
      *   NULL when nothing was announced — the firewall was disabled, skipped
@@ -119,7 +133,27 @@ final class DecisionRecorder implements EventSubscriberInterface
      */
     public function getDecision(): ?DecisionEvent
     {
-        return $this->decision;
+        foreach (array_reverse($this->decisions) as $decision) {
+            if (!$decision instanceof RequestAllowed || $decision->getPlugin() !== null) {
+                return $decision;
+            }
+        }
+
+        return $this->decisions === [] ? null : $this->decisions[count($this->decisions) - 1];
+    }
+
+    /**
+     * Every decision announced for this request, in order.
+     *
+     * For what a non-terminal decision adds to a terminal one: the mark on a
+     * request that was then blocked, or how long a slow block was held.
+     *
+     * @return list<DecisionEvent>
+     *   Empty when nothing was announced.
+     */
+    public function getDecisions(): array
+    {
+        return $this->decisions;
     }
 
     /**
@@ -131,6 +165,8 @@ final class DecisionRecorder implements EventSubscriberInterface
      */
     public function getChallengedProvider(): ?string
     {
-        return $this->decision instanceof RequestChallenged ? $this->decision->getProvider() : null;
+        $decision = $this->getDecision();
+
+        return $decision instanceof RequestChallenged ? $decision->getProvider() : null;
     }
 }

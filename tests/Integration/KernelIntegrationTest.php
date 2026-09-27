@@ -192,6 +192,45 @@ final class KernelIntegrationTest extends TestCase
         self::assertSame('application reached', $kernel->handle($this->request('/'))->getContent());
     }
 
+    public function testAMarkedRequestReadsAsMarkedInThePanel(): void
+    {
+        // A mark is non-terminal, so the ladder carries on and ends in a
+        // default allow. Every unit test recorded the mark on its own, which
+        // is how the panel came to say "allowed" here without anything
+        // failing (#9).
+        $data = $this->panelFor(['config_files' => [self::CONFIG . 'mark.yml']], $this->request('/', '203.0.113.5'));
+
+        self::assertSame('marked', $data['verdict']);
+        self::assertSame('needs-captcha', $data['mark']);
+        self::assertNull($data['enforced'], 'enforcing, so not "observed only"');
+    }
+
+    public function testARecordedRequestReadsAsRecordedInThePanel(): void
+    {
+        $data = $this->panelFor(['config_files' => [self::CONFIG . 'record.yml']], $this->request('/.env'));
+
+        self::assertSame('recorded', $data['verdict']);
+        self::assertSame(['name' => 'test-honeypot', 'class' => \Kanopi\Firewall\Plugins\Url::class], $data['rule']);
+    }
+
+    public function testAHeldRequestReadsAsTarpittedAndASlowBlockKeepsItsHold(): void
+    {
+        $held = $this->panelFor($this->tarpitConfig(), $this->request('/', '203.0.113.5'));
+
+        self::assertSame('tarpitted', $held['verdict']);
+        self::assertIsArray($held['tarpit']);
+        self::assertSame(1, $held['tarpit']['seconds']);
+        self::assertTrue($held['tarpit']['held']);
+
+        // Held, then refused: the block is the verdict, and the hold is
+        // still on the panel rather than lost behind it.
+        $slowBlock = $this->panelFor($this->tarpitConfig(), $this->request('/', '203.0.113.6'));
+
+        self::assertSame('blocked', $slowBlock['verdict']);
+        self::assertIsArray($slowBlock['tarpit']);
+        self::assertTrue($slowBlock['tarpit']['held']);
+    }
+
     public function testTheProfilerPanelReportsTheVerdictAndHealth(): void
     {
         // The collector only runs when the profiler does, so this needs a
@@ -536,6 +575,60 @@ final class KernelIntegrationTest extends TestCase
         bool $debug = false
     ): TestKernel {
         return new TestKernel($bundleConfig, $frameworkConfig, $withMonolog, $debug);
+    }
+
+    /**
+     * The panel data for one request through a booted, profiled kernel.
+     *
+     * @param array<string, mixed> $bundleConfig
+     *   The `kanopi_firewall` block.
+     *
+     * @return array<string, mixed>
+     *   What the collector gathered.
+     */
+    private function panelFor(array $bundleConfig, Request $request): array
+    {
+        $kernel = $this->boot(
+            $bundleConfig,
+            ['profiler' => ['enabled' => true, 'collect' => true, 'only_exceptions' => false]],
+            false,
+            debug: true
+        );
+        $kernel->handle($request);
+
+        /** @var \Kanopi\FirewallBundle\DataCollector\FirewallDataCollector $collector */
+        $collector = $this->service($kernel, 'test.kanopi_firewall.data_collector');
+
+        return $collector->getData();
+    }
+
+    /**
+     * The tarpit fixture, over a FileStorage the test owns.
+     *
+     * A tarpit will not start without a backend that counts holds
+     * atomically, and InMemoryStorage cannot — so the storage is set here,
+     * under the directory tearDown() removes.
+     *
+     * @return array<string, mixed>
+     *   A `kanopi_firewall` block.
+     */
+    private function tarpitConfig(): array
+    {
+        $directory = sys_get_temp_dir() . '/kanopi-firewall-bundle-tests/tarpit-' . bin2hex(random_bytes(4));
+        (new Filesystem())->mkdir($directory);
+
+        return [
+            'config_files' => [self::CONFIG . 'tarpit.yml'],
+            'settings' => [
+                'storage' => [
+                    'type' => \Kanopi\Firewall\Storage\FileStorage::class,
+                    'config' => [
+                        'storage_file' => $directory . '/blocked.data',
+                        'offense_file' => $directory . '/offenses.data',
+                    ],
+                ],
+            ],
+        ];
     }
 
     /**

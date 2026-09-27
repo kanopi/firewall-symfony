@@ -1,0 +1,28 @@
+# One address held, one refused outright. Storage is set by the test: a tarpit
+# will not start without a backend that counts holds atomically.
+global:
+  behind_proxy: false
+logger:
+  handlers:
+    - class: Monolog\Handler\NullHandler
+tarpit:
+  max_concurrent: 5
+  max_seconds: 1
+plugins:
+  - plugin: "Kanopi\\Firewall\\Plugins\\IpAddress"
+    response: tarpit
+    enable: true
+    metadata:
+      name: test-tarpit-ip
+      tarpit_seconds: 1
+    config:
+      - 203.0.113.5
+      - 203.0.113.6
+  - plugin: "Kanopi\\Firewall\\Plugins\\IpAddress"
+    response: block
+    enable: true
+    metadata:
+      name: test-block-ip
+      status_code: 403
+    config:
+      - 203.0.113.6
