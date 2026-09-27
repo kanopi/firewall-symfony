@@ -109,7 +109,7 @@ final class ConfigSnapshot
         Config::clearLoadErrors();
 
         /** @var array<string, mixed> $config */
-        $config = Config::load($this->configs, $this->overrides);
+        $config = Config::load($this->configs, LibraryOverrides::resolved($this->overrides));
 
         $this->errors = array_map(
             static fn (array $error): string => sprintf('%s: %s', $error['file'], $error['message']),

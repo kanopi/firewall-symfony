@@ -11,6 +11,7 @@ declare(strict_types=1);
 
 namespace Kanopi\FirewallBundle\Command;
 
+use Kanopi\FirewallBundle\Firewall\LibraryOverrides;
 use Kanopi\FirewallBundle\Firewall\ProxyPosture;
 use Symfony\Component\Yaml\Yaml;
 
@@ -133,7 +134,7 @@ final class EffectiveConfig
             $paths[] = $temporary[] = $this->write($settings, $directory);
         }
 
-        $overrides = array_merge($this->overrides, $this->proxyPosture?->overrides() ?? []);
+        $overrides = array_merge(LibraryOverrides::resolved($this->overrides), $this->proxyPosture?->overrides() ?? []);
 
         if ($overrides !== []) {
             $paths[] = $temporary[] = $this->write($this->expand($overrides), $directory);

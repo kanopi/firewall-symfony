@@ -25,6 +25,13 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **An empty `FIREWALL_CHALLENGE_SECRET` replaced the secret `firewall.yml` set.**
+  `challenge.secret`, `provider` and `audience` are written down only when set, but the
+  extension can only check that at compile time, when `'%env(FIREWALL_CHALLENGE_SECRET)%'` is
+  a placeholder. An environment that left the variable empty (what a committed `.env` does,
+  following Symfony's own `APP_SECRET`) produced an override of `''`, and every challenge
+  rule failed to start. An empty value for those three is now read as "not set" when the
+  value is finally known.
 - `kanopi:firewall:init --help` said the default output was `firewall.yml` in the current
   directory. It is `config/firewall.yml`.
 
