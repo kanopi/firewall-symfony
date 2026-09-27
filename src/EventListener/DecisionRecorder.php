@@ -20,6 +20,7 @@ use Kanopi\Firewall\Event\RequestChallenged;
 use Kanopi\Firewall\Event\RequestMarked;
 use Kanopi\Firewall\Event\RequestRecorded;
 use Kanopi\Firewall\Event\RequestRedirected;
+use Kanopi\Firewall\Event\RequestTarpitted;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 
 /**
@@ -77,6 +78,9 @@ final class DecisionRecorder implements EventSubscriberInterface
             RequestRecorded::class => 'record',
             RequestRedirected::class => 'record',
             RequestMarked::class => 'record',
+            // Added in 2.30.0, and found by DecisionRecorderTest the day CI
+            // resolved it -- which is the test doing exactly its job.
+            RequestTarpitted::class => 'record',
         ];
     }
 

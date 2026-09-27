@@ -20,6 +20,7 @@ use Kanopi\Firewall\Event\RequestChallenged;
 use Kanopi\Firewall\Event\RequestMarked;
 use Kanopi\Firewall\Event\RequestRecorded;
 use Kanopi\Firewall\Event\RequestRedirected;
+use Kanopi\Firewall\Event\RequestTarpitted;
 use Kanopi\Firewall\Firewall;
 use Kanopi\FirewallBundle\EventListener\DecisionRecorder;
 use Kanopi\FirewallBundle\Firewall\FirewallFactory;
@@ -90,6 +91,7 @@ final class FirewallDataCollector extends DataCollector
             'mark' => $decision instanceof RequestMarked ? $decision->getMark() : null,
             'provider' => $this->provider($decision),
             'reason' => $decision instanceof ChallengeFailed ? $decision->getReason() : null,
+            'tarpit' => $this->tarpit($decision),
             'mode' => null,
             'configured_mode' => null,
             'panic_switch' => null,
@@ -211,6 +213,10 @@ final class FirewallDataCollector extends DataCollector
             // carries a mark the application may act on, which is the panel's
             // only trace that a rule matched at all.
             $decision instanceof RequestMarked => 'marked',
+            // Not "tarpitted" when the cap was full: the request was served
+            // at once, and an operator watching an attack has to be able to
+            // tell a tarpit working from a tarpit that has run out of room.
+            $decision instanceof RequestTarpitted => $decision->wasHeld() ? 'tarpitted' : 'tarpit full',
             $decision instanceof RequestAllowed => $decision->wasBypassed() ? 'bypassed' : 'allowed',
             default => 'not evaluated',
         };
@@ -229,7 +235,7 @@ final class FirewallDataCollector extends DataCollector
             $decision instanceof RequestBlocked, $decision instanceof RequestAllowed => $decision->getPlugin(),
             $decision instanceof RequestChallenged => $decision->getPlugin(),
             $decision instanceof RequestRecorded, $decision instanceof RequestRedirected => $decision->getPlugin(),
-            $decision instanceof RequestMarked => $decision->getPlugin(),
+            $decision instanceof RequestMarked, $decision instanceof RequestTarpitted => $decision->getPlugin(),
             default => null,
         };
 
@@ -247,6 +253,25 @@ final class FirewallDataCollector extends DataCollector
             $decision instanceof ChallengeFailed => $decision->getProvider(),
             default => null,
         };
+    }
+
+    /**
+     * How long a tarpitted request was held, and how busy the tarpit was.
+     *
+     * @return array{held: bool, seconds: int, in_flight: int}|null
+     *   NULL unless the decision was a tarpit.
+     */
+    private function tarpit(?DecisionEvent $decision): ?array
+    {
+        if (!$decision instanceof RequestTarpitted) {
+            return null;
+        }
+
+        return [
+            'held' => $decision->wasHeld(),
+            'seconds' => $decision->getSeconds(),
+            'in_flight' => $decision->getInFlight(),
+        ];
     }
 
     /**

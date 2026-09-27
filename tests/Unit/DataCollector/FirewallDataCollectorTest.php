@@ -20,6 +20,7 @@ use Kanopi\Firewall\Event\RequestChallenged;
 use Kanopi\Firewall\Event\RequestMarked;
 use Kanopi\Firewall\Event\RequestRecorded;
 use Kanopi\Firewall\Event\RequestRedirected;
+use Kanopi\Firewall\Event\RequestTarpitted;
 use Kanopi\Firewall\Plugins\PluginInterface;
 use Kanopi\FirewallBundle\DataCollector\FirewallDataCollector;
 use Kanopi\FirewallBundle\EventListener\DecisionRecorder;
@@ -82,6 +83,10 @@ final class FirewallDataCollectorTest extends TestCase
         yield 'recorded' => [new RequestRecorded($request, $plugin, true), 'recorded'];
         yield 'redirected' => [new RequestRedirected($request, $plugin, '/notice', 307), 'redirected'];
         yield 'marked' => [new RequestMarked($request, $plugin, 'needs-captcha', 'firewall.marks'), 'marked'];
+        // 2.30.0. A tarpit at capacity serves the request at once, and that
+        // must not read the same as one that was actually held.
+        yield 'tarpitted' => [new RequestTarpitted($request, $plugin, 5, true, 1), 'tarpitted'];
+        yield 'tarpit at capacity' => [new RequestTarpitted($request, $plugin, 0, false, 32), 'tarpit full'];
     }
 
     public function testABlockNamesTheRuleAndTheStatus(): void
@@ -124,6 +129,27 @@ final class FirewallDataCollectorTest extends TestCase
         self::assertSame('needs-captcha', $data['mark']);
         self::assertNull($data['status_code'], 'nothing was answered with a status');
         self::assertSame(['name' => 'stub-rule', 'class' => StubPlugin::class], $data['rule']);
+    }
+
+    public function testATarpitSaysHowLongItHeldAndHowBusyItWas(): void
+    {
+        $recorder = new DecisionRecorder();
+        $recorder->record(new RequestTarpitted(Request::create('/wp-login.php'), new StubPlugin(), 5, true, 3));
+
+        $data = $this->collect($recorder);
+
+        self::assertSame(['held' => true, 'seconds' => 5, 'in_flight' => 3], $data['tarpit']);
+        self::assertSame(['name' => 'stub-rule', 'class' => StubPlugin::class], $data['rule']);
+        self::assertNull($data['status_code'], 'nothing was answered with a status');
+        self::assertFalse($data['enforced'], 'nothing was refused');
+    }
+
+    public function testOnlyATarpitCarriesTarpitData(): void
+    {
+        $recorder = new DecisionRecorder();
+        $recorder->record(new RequestBlocked(Request::create('/'), new StubPlugin(), 403));
+
+        self::assertNull($this->collect($recorder)['tarpit']);
     }
 
     public function testARecordedRequestNamesTheRuleThatWillRefuseTheNextOne(): void

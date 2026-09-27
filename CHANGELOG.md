@@ -6,7 +6,20 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+- The profiler panel reports tarpit decisions (kanopi/firewall 2.30.0): `tarpitted` when
+  the request was held, `tarpit full` when the cap was reached and it was served at once,
+  plus the seconds held, the holds in flight, and the rule that asked.
+
+### Fixed
+
+- A tarpitted request no longer reads as "not evaluated" in the profiler. The decision
+  recorder subscribes by class, and `RequestTarpitted` was not on its list.
+
+### Changed
+
+- `kanopi/firewall` requires `^2.30`, up from `^2.26`.
 
 ## [1.0.0] — 2026-09-12
 
