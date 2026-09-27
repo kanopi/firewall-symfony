@@ -12,6 +12,7 @@ declare(strict_types=1);
 namespace Kanopi\FirewallBundle\Http;
 
 use Kanopi\Firewall\Utility\Config;
+use Kanopi\FirewallBundle\Firewall\LibraryOverrides;
 
 /**
  * Reads the merged `challenge:` block, and refuses one wiring the bundle
@@ -79,7 +80,7 @@ final class ChallengeConfigResolver
         }
 
         /** @var array<string, mixed> $config */
-        $config = Config::load($this->configs, $this->overrides);
+        $config = Config::load($this->configs, LibraryOverrides::resolved($this->overrides));
 
         /** @var array<string, mixed> $challenge */
         $challenge = isset($config['challenge']) && is_array($config['challenge']) ? $config['challenge'] : [];
