@@ -339,6 +339,18 @@ abstract class AbstractScriptCommand extends AbstractFirewallCommand
             );
         }
 
+        return $this->noConfigExitCode();
+    }
+
+    /**
+     * What to exit with when there is no configuration to hand the script.
+     *
+     * The library's own code for "the configuration could not be read", so
+     * an operator's script reads the same answer from the wrapper as from
+     * the script. 2 for every script but one; see CheckCommand.
+     */
+    protected function noConfigExitCode(): int
+    {
         return self::EXIT_CONFIG_UNREADABLE;
     }
 }

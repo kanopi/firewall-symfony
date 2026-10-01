@@ -33,6 +33,12 @@ use Symfony\Component\Console\Input\InputOption;
 final class CheckCommand extends AbstractScriptCommand
 {
     /**
+     * `firewall-check`'s code for a configuration it cannot read, or
+     * arguments that made no sense — sysexits' EX_USAGE.
+     */
+    public const EXIT_USAGE = 64;
+
+    /**
      * {@inheritdoc}
      */
     protected function configure(): void
@@ -54,6 +60,12 @@ final class CheckCommand extends AbstractScriptCommand
                 'Request header as NAME:VALUE. Repeatable'
             )
             ->addOption('body', null, InputOption::VALUE_REQUIRED, 'Request body')
+            ->addOption(
+                'script-name',
+                null,
+                InputOption::VALUE_REQUIRED,
+                'The PHP file the web server runs for this URL. Rarely right here: Symfony always runs public/index.php'
+            )
             ->addOption('explain', null, InputOption::VALUE_NONE, 'Show every rule that evaluated, with result and timing')
             ->addOption('lint', null, InputOption::VALUE_NONE, 'Report what is wrong with the rules, evaluating no request')
             ->addOption(
@@ -70,8 +82,14 @@ final class CheckCommand extends AbstractScriptCommand
                   <info>%command.full_name% --ip=203.0.113.5 --url=/wp-admin/ --explain</info>
                   <info>%command.full_name% --lint</info>
 
-                Exit codes are the script's: <comment>0</comment> allowed, <comment>1</comment> the request would be
-                blocked or challenged, <comment>2</comment> the configuration could not be read.
+                Exit codes are the script's, one per verdict, so a CI gate can assert which one:
+                <comment>0</comment> allowed, <comment>1</comment> blocked, <comment>2</comment> challenged, <comment>3</comment> redirected,
+                <comment>64</comment> the configuration could not be read or the arguments made no sense,
+                <comment>70</comment> the evaluation failed unexpectedly.
+
+                <comment>--script-name</comment> simulates a file the web server runs directly, as WordPress
+                serves <comment>/wp-login.php</comment>. A Symfony application always runs <comment>public/index.php</comment>,
+                so the default is the answer here unless the firewall sits in front of something else.
                 HELP
             );
     }
@@ -94,13 +112,26 @@ final class CheckCommand extends AbstractScriptCommand
 
     /**
      * {@inheritdoc}
+     *
+     * 64, the script's own code for a configuration it cannot read, rather
+     * than the 2 every other command uses. To this script 2 means
+     * challenged, so a CI gate asserting that a URL is challenged would pass
+     * on an application with no firewall configuration at all.
+     */
+    protected function noConfigExitCode(): int
+    {
+        return self::EXIT_USAGE;
+    }
+
+    /**
+     * {@inheritdoc}
      */
     protected function scriptArguments(InputInterface $input): array
     {
         return $this->forwardOptions(
             $input,
             flags: ['explain', 'lint', 'live-storage', 'json'],
-            values: ['ip', 'url', 'method', 'body'],
+            values: ['ip', 'url', 'method', 'body', 'script-name'],
             repeatable: ['header']
         );
     }
