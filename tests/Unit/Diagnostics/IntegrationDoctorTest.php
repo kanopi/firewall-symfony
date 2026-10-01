@@ -405,6 +405,47 @@ final class IntegrationDoctorTest extends TestCase
         self::assertStringContainsString('kanopi:firewall:init', (string) $finding->detail);
     }
 
+    public function testTheDefaultPathSourceIsTheOneASymfonyApplicationWants(): void
+    {
+        $finding = $this->matching($this->diagnose(), 'front controller');
+
+        self::assertSame(Diagnosis::OK, $finding->status);
+        self::assertSame('global.path_source is pathinfo.', $finding->detail);
+    }
+
+    public function testScriptNameIsWrongForAFrontControllerApplication(): void
+    {
+        // Symfony always runs public/index.php. In a subdirectory install,
+        // script_name puts the subdirectory in front of every path.
+        $configs = [self::CONFIG . 'block.yml', ['global' => ['path_source' => 'script_name']]];
+
+        $finding = $this->matching($this->diagnose(configs: $configs), 'script_name');
+
+        self::assertSame(Diagnosis::WARNING, $finding->status);
+        self::assertStringContainsString('public/index.php', (string) $finding->detail);
+        self::assertStringContainsString('subdirectory', (string) $finding->detail);
+    }
+
+    public function testABasePathIsNamedAsTheThingUndoingScriptName(): void
+    {
+        $configs = [self::CONFIG . 'block.yml', ['global' => ['path_source' => 'script_name', 'base_path' => '/blog']]];
+
+        $finding = $this->matching($this->diagnose(configs: $configs), 'script_name');
+
+        self::assertStringContainsString('global.base_path (/blog)', (string) $finding->detail);
+    }
+
+    public function testAnUnknownPathSourceIsLeftToTheLibrarysDoctor(): void
+    {
+        // The library falls back to pathinfo and its own doctor reports the
+        // value as an error, so this only names what was written.
+        $configs = [self::CONFIG . 'block.yml', ['global' => ['path_source' => 'request_uri']]];
+
+        $finding = $this->matching($this->diagnose(configs: $configs), 'front controller');
+
+        self::assertSame('global.path_source is request_uri.', $finding->detail);
+    }
+
     public function testFailOpenIsStatedRatherThanJudged(): void
     {
         // A deliberate choice, and the right one for some deployments. What

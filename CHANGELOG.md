@@ -20,6 +20,27 @@ All notable changes to this project are documented here. The format follows
   `Surrogate-Control` and `CDN-Cache-Control`. Under `blocked_response: http_exception` they
   travel with the `HttpException`, so the application's error page carries them too.
 
+- **A check with no configuration exited 2, which `kanopi:firewall:check` uses for a
+  challenged request** (#21). Every wrapper exits 2 when `config_files` is empty, but to
+  `firewall-check` 2 is the challenged verdict, so a CI gate asserting that a URL is
+  challenged passed on an application with no rules at all. The check now exits 64, the
+  script's own code for a configuration it cannot read. Its help also listed the exit codes
+  wrong: 2 is challenged, not an unreadable configuration. It now lists 0 allowed, 1 blocked,
+  2 challenged, 3 redirected (since kanopi/firewall 2.33.1), 64 and 70.
+
+### Added
+
+- `kanopi:firewall:doctor` warns when `global.path_source` is `script_name` (#20). That
+  setting (kanopi/firewall 2.34) matches the file the web server ran, for WordPress's
+  directly served files. A Symfony application always runs `public/index.php`, so the
+  default is already the path it routes on, and in a subdirectory install `script_name`
+  puts the subdirectory in front of every path, so a rule written as `/admin` stops
+  matching.
+- `kanopi:firewall:check --script-name`, declared rather than only passed through (#21).
+- README: challenge notices (#22). `challenge.notice` and `RequestChallenged::addNotice()`
+  (kanopi/firewall 2.35) already reach the bundle's interstitial; a kernel test now keeps it
+  that way.
+
 ### Changed
 
 - `kanopi/firewall` requires `^2.36`, up from `^2.33` (#19). 2.34.1 for `NoStore`. The floor

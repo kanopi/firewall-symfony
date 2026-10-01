@@ -127,6 +127,7 @@ final class IntegrationDoctor
             $this->checkListenerPriority(),
             $this->checkChallengePath(),
             $this->checkProxyPosture(),
+            $this->checkPathSource(),
             $this->checkStorage(),
             $this->checkStartupPolicy(),
             $this->checkLogging(),
@@ -395,6 +396,47 @@ final class IntegrationDoctor
             . 'framework.trusted_proxies (global.trusted_proxies in the firewall configuration also '
             . 'works, for the firewall alone), or kanopi_firewall.behind_proxy: false if there is genuinely '
             . 'nothing in front.'
+        );
+    }
+
+    /**
+     * Do the rules see the path the application routes on?
+     *
+     * `global.path_source: script_name` (kanopi/firewall 2.34) matches the
+     * file the web server ran rather than the path through the front
+     * controller, for WordPress's directly served `wp-login.php` and
+     * `/wp-admin/*.php`. A Symfony application always runs
+     * `public/index.php`, so the default is already the path it routes on,
+     * and the library says front-controller applications should keep it.
+     * Here `script_name` is a no-op at best. In a subdirectory install it
+     * puts the base path in front of every path, and a rule written as
+     * `/admin` quietly stops matching.
+     *
+     * An unknown value is left to the library's half of the doctor, which
+     * reports it as an error.
+     */
+    private function checkPathSource(): Diagnosis
+    {
+        $source = $this->configSnapshot->pathSource();
+
+        if ($source !== 'script_name') {
+            return Diagnosis::ok(
+                'Rules see the path through the front controller',
+                sprintf('global.path_source is %s.', $source)
+            );
+        }
+
+        $basePath = $this->configSnapshot->basePath();
+
+        return Diagnosis::warning(
+            'global.path_source is script_name',
+            'That matches the file the web server ran, which is for WordPress\'s directly served '
+            . 'files. A Symfony application always runs public/index.php, so the default (pathinfo) '
+            . 'is already the path it routes on'
+            . ($basePath === ''
+                ? '. In a subdirectory install, script_name would put the subdirectory in front of every path.'
+                : sprintf(', and global.base_path (%s) only has to undo what script_name added.', $basePath))
+            . ' Remove global.path_source unless the firewall sits in front of something other than this application.'
         );
     }
 

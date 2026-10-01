@@ -211,6 +211,27 @@ final class ScriptCommandTest extends TestCase
         self::assertStringContainsString('needs a configuration file', $tester->getDisplay());
     }
 
+    public function testACheckWithNothingConfiguredCannotReadAsChallenged(): void
+    {
+        // To firewall-check, 2 is the challenged verdict. A gate asserting
+        // that a URL is challenged must not pass on an application with no
+        // rules, so the check takes the script's own code for an unreadable
+        // configuration instead.
+        $tester = $this->tester(new CheckCommand(...$this->collaborators([])));
+
+        self::assertSame(CheckCommand::EXIT_USAGE, $tester->execute([]));
+        self::assertStringContainsString('needs a configuration file', $tester->getDisplay());
+    }
+
+    public function testTheCheckForwardsAScriptNameForADirectlyServedFile(): void
+    {
+        $tester = $this->tester(new CheckCommand(...$this->collaborators(['/etc/firewall.yml'])));
+
+        $tester->execute(['--url' => '/wp-login.php', '--script-name' => '/wp-login.php']);
+
+        self::assertStringContainsString('--url=/wp-login.php|--script-name=/wp-login.php', $tester->getDisplay());
+    }
+
     public function testACommandThatWritesConfigurationSaysWhyItNeedsARealFile(): void
     {
         $tester = $this->tester(new RuleCommand(...$this->collaborators([['plugins' => []]])));

@@ -141,6 +141,32 @@ final class KernelIntegrationTest extends TestCase
         self::assertStringContainsString('/_firewall/challenge', (string) $response->getContent(), 'the interstitial, not an error page');
     }
 
+    public function testChallengeNoticesFromConfigAndFromAListenerReachTheInterstitial(): void
+    {
+        // kanopi/firewall 2.35. Both routes ride in the render context the
+        // ChallengeRequiredException carries, and the listener reaches the
+        // event because the bundle hands Symfony's dispatcher to the library.
+        $kernel = $this->boot([
+            'config_files' => [self::CONFIG . 'challenge.yml'],
+            'settings' => ['challenge' => ['notice' => 'We are seeing unusual traffic from your network.']],
+        ]);
+        $kernel->boot();
+
+        /** @var \Symfony\Component\EventDispatcher\EventDispatcherInterface $dispatcher */
+        $dispatcher = $this->service($kernel, 'event_dispatcher');
+        $dispatcher->addListener(
+            \Kanopi\Firewall\Event\RequestChallenged::class,
+            static function (\Kanopi\Firewall\Event\RequestChallenged $event): void {
+                $event->addNotice('Your session was signed out <for safety>.');
+            }
+        );
+
+        $html = (string) $kernel->handle($this->request('/gated', '198.51.100.1'))->getContent();
+
+        self::assertStringContainsString('We are seeing unusual traffic from your network.', $html);
+        self::assertStringContainsString('Your session was signed out &lt;for safety&gt;.', $html, 'escaped by the renderer');
+    }
+
     public function testASolvedChallengeSetsThePassCookieAndRedirects(): void
     {
         $kernel = $this->boot(['config_files' => [self::CONFIG . 'challenge.yml']]);

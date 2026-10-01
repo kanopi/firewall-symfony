@@ -208,6 +208,29 @@ final class ConfigSnapshotTest extends TestCase
         self::assertSame('block', $snapshot->libraryMode(), 'the library\'s own default');
     }
 
+    public function testThePathSourceDefaultsToPathinfo(): void
+    {
+        self::assertSame('pathinfo', (new ConfigSnapshot([['plugins' => []]], []))->pathSource());
+        self::assertSame('pathinfo', (new ConfigSnapshot([['global' => 'nope']], []))->pathSource());
+        self::assertSame('', (new ConfigSnapshot([['plugins' => []]], []))->basePath());
+    }
+
+    public function testThePathSourceAndBasePathAreReadAsWritten(): void
+    {
+        $snapshot = new ConfigSnapshot([['global' => ['path_source' => 'script_name', 'base_path' => '/blog']]], []);
+
+        self::assertSame('script_name', $snapshot->pathSource());
+        self::assertSame('/blog', $snapshot->basePath());
+    }
+
+    public function testAPathSourceThatIsNotTextIsNamedByItsType(): void
+    {
+        $snapshot = new ConfigSnapshot([['global' => ['path_source' => ['script_name'], 'base_path' => 7]]], []);
+
+        self::assertSame('array', $snapshot->pathSource());
+        self::assertSame('', $snapshot->basePath());
+    }
+
     public function testTheStorageFileIsTheOneTheLastInputNames(): void
     {
         // The bundle's storage_file is appended as the last input, so it is

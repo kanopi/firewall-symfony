@@ -458,6 +458,38 @@ The library's answer was to put the provider and the signed context on the excep
 the refusal, the bundle's own renderer and the cache warmer that raised the refusal at
 `cache:clear` are all gone, and the whole of consuming the fix is one call.
 
+### Telling the visitor why
+
+The challenge page can carry a notice, so a visitor who's asked again knows why
+(kanopi/firewall 2.35). Set a fixed one in `firewall.yml` or inline settings:
+
+```yaml
+challenge:
+  notice: "We're seeing unusual traffic from your network. Please confirm you're human."
+```
+
+Or add one per request from a listener, which gets the same `RequestChallenged` event the
+profiler reads, because the bundle hands Symfony's dispatcher to the library:
+
+```php
+use Kanopi\Firewall\Event\RequestChallenged;
+use Symfony\Component\EventDispatcher\Attribute\AsEventListener;
+
+#[AsEventListener]
+final class ExplainTheChallenge
+{
+    public function __invoke(RequestChallenged $event): void
+    {
+        if ($event->getRequest()->cookies->has('signed_out')) {
+            $event->addNotice('You were signed out, so we need to check again.');
+        }
+    }
+}
+```
+
+The configured notice comes first, then any the listeners add. The library escapes them,
+so request data is safe to include.
+
 ## Console commands
 
 Sixteen commands under `kanopi:firewall:`, each with a short `kfw:` alias. Nine wrap the
@@ -610,6 +642,12 @@ Exit codes are the library's, and they are the same across every command here: *
 or warnings only, **1** something configured is not happening or the action was refused,
 **2** the configuration could not be read or the arguments made no sense, **3** changes are
 pending (`migrate --dry-run` only, so a deploy can gate on it).
+
+`kanopi:firewall:check` is the exception, because its exit code is the verdict: **0**
+allowed, **1** blocked, **2** challenged, **3** redirected, **64** the configuration could
+not be read or the arguments made no sense, **70** the evaluation failed unexpectedly. A
+check with no configuration exits 64 too, rather than the 2 the other commands use, so a
+CI gate asserting that a URL is challenged can't pass on an application with no rules.
 
 `kanopi:firewall:doctor --json` emits *two* documents — the integration findings, then
 whatever the script writes. They cannot be merged: the second half comes from another

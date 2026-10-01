@@ -242,6 +242,32 @@ final class ConfigSnapshot
     }
 
     /**
+     * `global.path_source` as written, or `pathinfo` when it is not.
+     */
+    public function pathSource(): string
+    {
+        $global = $this->all()['global'] ?? null;
+        $source = is_array($global) ? ($global['path_source'] ?? null) : null;
+
+        if ($source === null) {
+            return 'pathinfo';
+        }
+
+        return is_scalar($source) ? (string) $source : get_debug_type($source);
+    }
+
+    /**
+     * `global.base_path` as written, or an empty string when it is not.
+     */
+    public function basePath(): string
+    {
+        $global = $this->all()['global'] ?? null;
+        $basePath = is_array($global) ? ($global['base_path'] ?? null) : null;
+
+        return is_string($basePath) ? $basePath : '';
+    }
+
+    /**
      * The configured storage class, or an empty string when none is set.
      */
     public function storageType(): string
