@@ -74,7 +74,12 @@ final class KernelIntegrationTest extends TestCase
         // headers that stop it rendering as markup are part of the contract.
         self::assertSame('text/plain; charset=utf-8', $response->headers->get('Content-Type'));
         self::assertSame('nosniff', $response->headers->get('X-Content-Type-Options'));
-        self::assertSame('no-store, private', $response->headers->get('Cache-Control'));
+        // The whole set, through the kernel, so no response listener strips
+        // what the factory set (kanopi/firewall 2.34.1).
+        self::assertStringContainsString('no-cache', (string) $response->headers->get('Cache-Control'));
+        self::assertStringContainsString('no-store', (string) $response->headers->get('Cache-Control'));
+        self::assertSame('no-store', $response->headers->get('Surrogate-Control'));
+        self::assertSame('no-store', $response->headers->get('CDN-Cache-Control'));
     }
 
     public function testAnUnmatchedRequestReachesTheApplication(): void
@@ -102,6 +107,10 @@ final class KernelIntegrationTest extends TestCase
         // Symfony's ResponseHeaderBag normalises `no-store` by adding
         // `private`; what matters is that nothing caches the interstitial.
         self::assertStringContainsString('no-store', (string) $response->headers->get('Cache-Control'));
+        // `no-store` alone is what Pantheon's CDN cached, handing every
+        // visitor the same single-use challenge.
+        self::assertSame('no-store', $response->headers->get('CDN-Cache-Control'));
+        self::assertSame('no-store', $response->headers->get('Surrogate-Control'));
     }
 
     public function testAnEmptySecretInTheEnvironmentLeavesTheYamlSecretAlone(): void
@@ -363,9 +372,12 @@ final class KernelIntegrationTest extends TestCase
 
         $response = $kernel->handle($this->request('/', '203.0.113.5'));
 
-        // The application's error controller owns the body now; only the
-        // status crosses over, which is the whole point of the mode.
+        // The application's error controller owns the body now. The status
+        // crosses over, and so do the caching headers: a host's error page
+        // cached at the edge is a block that outlives the ban.
         self::assertSame(403, $response->getStatusCode());
+        self::assertSame('no-store', $response->headers->get('CDN-Cache-Control'));
+        self::assertStringContainsString('no-store', (string) $response->headers->get('Cache-Control'));
     }
 
     public function testTheListenerRunsBeforeRoutingAndAfterRequestValidation(): void

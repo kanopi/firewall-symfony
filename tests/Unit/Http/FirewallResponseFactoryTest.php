@@ -12,13 +12,14 @@ declare(strict_types=1);
 namespace Kanopi\FirewallBundle\Tests\Unit\Http;
 
 use Kanopi\Firewall\Event\ChallengeSolved;
-use Kanopi\Firewall\Firewall;
 use Kanopi\Firewall\Event\RequestAllowed;
 use Kanopi\Firewall\Exception\ChallengeRequiredException;
 use Kanopi\Firewall\Exception\ChallengeSolvedException;
+use Kanopi\Firewall\Exception\FirewallBlockedException;
 use Kanopi\Firewall\Exception\FirewallLockdownException;
 use Kanopi\Firewall\Exception\FirewallRedirectException;
-use Kanopi\Firewall\Exception\FirewallBlockedException;
+use Kanopi\Firewall\Firewall;
+use Kanopi\Firewall\Utility\NoStore;
 use Kanopi\FirewallBundle\EventListener\DecisionRecorder;
 use Kanopi\FirewallBundle\Http\ChallengeConfigResolver;
 use Kanopi\FirewallBundle\Http\FirewallResponseFactory;
@@ -65,7 +66,7 @@ final class FirewallResponseFactoryTest extends TestCase
 
         self::assertSame('text/plain; charset=utf-8', $response->headers->get('Content-Type'));
         self::assertSame('nosniff', $response->headers->get('X-Content-Type-Options'));
-        self::assertStringContainsString('no-store', (string) $response->headers->get('Cache-Control'));
+        self::assertUncacheable($response);
     }
 
     #[DataProvider('provideImpossibleStatusCodes')]
@@ -101,6 +102,9 @@ final class FirewallResponseFactoryTest extends TestCase
             // banning message can carry bytes the client chose.
             self::assertSame('', $httpException->getMessage());
             self::assertInstanceOf(FirewallBlockedException::class, $httpException->getPrevious());
+            // The error controller writes the body, but a host's error page
+            // cached at the edge is the same block outliving the ban.
+            self::assertSame(NoStore::HEADERS, $httpException->getHeaders());
         }
     }
 
@@ -114,7 +118,7 @@ final class FirewallResponseFactoryTest extends TestCase
         // error.
         self::assertSame(200, $response->getStatusCode());
         self::assertSame('text/html; charset=utf-8', $response->headers->get('Content-Type'));
-        self::assertStringContainsString('no-store', (string) $response->headers->get('Cache-Control'));
+        self::assertUncacheable($response);
         self::assertStringContainsString('challenge_answer', (string) $response->getContent());
     }
 
@@ -145,7 +149,7 @@ final class FirewallResponseFactoryTest extends TestCase
 
         self::assertSame(302, $response->getStatusCode());
         self::assertSame('/notice', $response->headers->get('Location'));
-        self::assertStringContainsString('no-store', (string) $response->headers->get('Cache-Control'));
+        self::assertUncacheable($response);
     }
 
     public function testARedirectStatusThatIsNotARedirectFallsBackToOne(): void
@@ -187,7 +191,7 @@ final class FirewallResponseFactoryTest extends TestCase
             self::fail('http_exception mode should throw');
         } catch (HttpException $httpException) {
             self::assertSame(503, $httpException->getStatusCode());
-            self::assertSame(['Retry-After' => '600'], $httpException->getHeaders());
+            self::assertSame(NoStore::HEADERS + ['Retry-After' => '600'], $httpException->getHeaders());
         }
     }
 
@@ -200,6 +204,7 @@ final class FirewallResponseFactoryTest extends TestCase
         // has already burned.
         self::assertSame(Response::HTTP_SEE_OTHER, $response->getStatusCode());
         self::assertSame('/wanted', $response->headers->get('Location'));
+        self::assertUncacheable($response, 'it carries a pass token');
 
         $cookie = $response->headers->getCookies()[0];
         self::assertSame('fw_challenge_pass', $cookie->getName());
@@ -321,5 +326,24 @@ final class FirewallResponseFactoryTest extends TestCase
             $cookieOptions ?? self::COOKIE,
             $blockedResponse
         );
+    }
+
+    /**
+     * Every header in the library's set, so no cache between the firewall
+     * and the visitor stores the response (kanopi/firewall 2.34.1).
+     *
+     * Directive by directive, because Symfony reorders `Cache-Control`.
+     */
+    private static function assertUncacheable(Response $response, string $why = ''): void
+    {
+        $cacheControl = (string) $response->headers->get('Cache-Control');
+
+        foreach (explode(', ', NoStore::HEADERS['Cache-Control']) as $directive) {
+            self::assertStringContainsString($directive, $cacheControl, $why);
+        }
+
+        foreach (['Pragma', 'Expires', 'Surrogate-Control', 'CDN-Cache-Control'] as $name) {
+            self::assertSame(NoStore::HEADERS[$name], $response->headers->get($name), $name . ($why === '' ? '' : ': ' . $why));
+        }
     }
 }

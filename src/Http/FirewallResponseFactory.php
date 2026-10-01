@@ -17,6 +17,7 @@ use Kanopi\Firewall\Exception\ChallengeSolvedException;
 use Kanopi\Firewall\Exception\FirewallBlockedException;
 use Kanopi\Firewall\Exception\FirewallLockdownException;
 use Kanopi\Firewall\Exception\FirewallRedirectException;
+use Kanopi\Firewall\Utility\NoStore;
 use Kanopi\FirewallBundle\EventListener\DecisionRecorder;
 use Symfony\Component\HttpFoundation\Cookie;
 use Symfony\Component\HttpFoundation\RedirectResponse;
@@ -88,25 +89,25 @@ final class FirewallResponseFactory
     public function blocked(FirewallBlockedException $exception): Response
     {
         $status = $this->normalizeStatus($exception->getStatusCode());
+        // A cached block page is a block that outlives the ban, served by a
+        // CDN to somebody who was never blocked. See noStore() for why it
+        // takes all five headers rather than `no-store`.
         $headers = [
             'Content-Type' => 'text/plain; charset=utf-8',
             'X-Content-Type-Options' => 'nosniff',
-            // A cached block page is a block that outlives the ban, served by
-            // a CDN to somebody who was never blocked. The library relies on
-            // the absence of a caching directive plus the status code; being
-            // explicit costs nothing and survives a shared cache configured
-            // to store 4xx.
-            'Cache-Control' => 'no-store, private',
-        ];
+        ] + NoStore::HEADERS;
 
         if ($exception instanceof FirewallLockdownException) {
             $headers['Retry-After'] = (string) $exception->getRetryAfter();
         }
 
+        // The error controller renders the body, but the caching headers are
+        // still the firewall's to state: a host's error page cached at the
+        // edge is the same block outliving the ban.
         if ($this->blockedResponse === 'http_exception') {
-            throw new HttpException($status, '', $exception, array_intersect_key(
+            throw new HttpException($status, '', $exception, array_diff_key(
                 $headers,
-                ['Retry-After' => true]
+                ['Content-Type' => true, 'X-Content-Type-Options' => true]
             ));
         }
 
@@ -145,13 +146,14 @@ final class FirewallResponseFactory
      */
     public function challengeRequired(ChallengeRequiredException $challengeRequiredException, Request $request): Response
     {
-        return new Response($challengeRequiredException->renderInterstitial($request), Response::HTTP_OK, [
-            'Content-Type' => 'text/html; charset=utf-8',
-            // Non-negotiable. The interstitial embeds per-visitor state — a
-            // signed math answer, a widget nonce — and a cached copy served
-            // to a second visitor is a challenge nobody can solve.
-            'Cache-Control' => 'no-store',
-        ]);
+        // Non-negotiable. The interstitial embeds per-visitor state — a signed
+        // math answer, a single-use ALTCHA challenge — and a cached copy
+        // served to a second visitor is a challenge nobody can solve.
+        return new Response(
+            $challengeRequiredException->renderInterstitial($request),
+            Response::HTTP_OK,
+            ['Content-Type' => 'text/html; charset=utf-8'] + NoStore::HEADERS
+        );
     }
 
     /**
@@ -162,9 +164,9 @@ final class FirewallResponseFactory
      * nothing by default, and it runs before the block bucket, so the
      * gentlest terminal answer wins.
      *
-     * `no-store` for the same reason a challenge carries it: the decision
-     * was made about this visitor, and a cached copy would send the next one
-     * to the same notice.
+     * Uncacheable for the same reason a challenge is: the decision was made
+     * about this visitor, and a cached copy would send the next one to the
+     * same notice.
      */
     public function redirected(FirewallRedirectException $firewallRedirectException): Response
     {
@@ -172,9 +174,8 @@ final class FirewallResponseFactory
             $firewallRedirectException->getLocation(),
             $this->normalizeRedirectStatus($firewallRedirectException->getStatusCode())
         );
-        $response->headers->set('Cache-Control', 'no-store');
 
-        return $response;
+        return $this->noStore($response);
     }
 
     /**
@@ -191,8 +192,9 @@ final class FirewallResponseFactory
      */
     public function challengeSolved(ChallengeSolvedException $exception): Response
     {
-        $response = new RedirectResponse($exception->getRedirect(), Response::HTTP_SEE_OTHER);
-        $response->headers->set('Cache-Control', 'no-store');
+        // Carries a pass token in its cookie: a cached copy would hand one
+        // visitor's pass to everybody behind the same edge.
+        $response = $this->noStore(new RedirectResponse($exception->getRedirect(), Response::HTTP_SEE_OTHER));
 
         $cookieName = $this->resolver->resolve()->cookieName;
 
@@ -208,6 +210,30 @@ final class FirewallResponseFactory
                 ->withSecure($this->cookieOptions['secure'])
                 ->withHttpOnly($this->cookieOptions['http_only'])
                 ->withSameSite($this->cookieOptions['same_site']));
+        }
+
+        return $response;
+    }
+
+    /**
+     * Keep a response out of every cache between here and the visitor.
+     *
+     * `NoStore::HEADERS`, the library's own set (kanopi/firewall 2.34.1).
+     * `Cache-Control: no-store` alone, which is what this bundle sent, is
+     * cached by some edges — Pantheon's Fastly-based Global CDN among them.
+     * For the interstitial that was a loop: every visitor to a challenged URL
+     * got the same single-use ALTCHA challenge, the first solver spent it,
+     * and everybody after was refused and sent back to the same cached page.
+     * In `mode: exception` the library writes none of these responses, so
+     * sending the full set is this bundle's job.
+     *
+     * Set rather than added, so a `Cache-Control` something earlier in the
+     * request put on the response cannot survive beside these.
+     */
+    private function noStore(Response $response): Response
+    {
+        foreach (NoStore::HEADERS as $name => $value) {
+            $response->headers->set($name, $value);
         }
 
         return $response;
