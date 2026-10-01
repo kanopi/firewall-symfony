@@ -6,7 +6,27 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
-Nothing yet.
+### Fixed
+
+- **A challenge page could be cached at the edge and loop every visitor** (#18). In
+  `mode: exception` the bundle writes every firewall response itself, and it sent
+  `Cache-Control: no-store` alone on the interstitial, the redirects and the solved
+  challenge, and `no-store, private` on a block. kanopi/firewall 2.34.1 found that Pantheon's
+  Fastly-based Global CDN caches a response carrying only `no-store`. Every visitor to a
+  challenged URL then got the same single-use ALTCHA challenge: the first to solve it got
+  through, and everyone after was refused and sent back to the same cached page. Every
+  response the bundle writes now sends the library's `NoStore::HEADERS`: `Cache-Control:
+  private, no-store, no-cache, must-revalidate, max-age=0`, plus `Pragma`, `Expires`,
+  `Surrogate-Control` and `CDN-Cache-Control`. Under `blocked_response: http_exception` they
+  travel with the `HttpException`, so the application's error page carries them too.
+
+### Changed
+
+- `kanopi/firewall` requires `^2.36`, up from `^2.33` (#19). 2.34.1 for `NoStore`. The floor
+  also makes sure every install has fixes that need nothing from the bundle: a solved
+  challenge can no longer redirect off-site (2.35.0), the path every rule sees is normalised
+  (2.35.0), ASN rules match (2.35.0), and a rate-limit key naming a field with a capital
+  letter counts that field (2.33.2).
 
 ## [1.2.0] — 2026-09-27
 

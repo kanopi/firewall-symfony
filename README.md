@@ -335,10 +335,10 @@ in 2.30.0.
 | `response:` | Refuses this request | Writes to the block list | The bundle returns |
 |---|---|---|---|
 | `allow` | — | — | nothing; the request continues |
-| `block` | ✅ | ✅ | `getStatusCode()`, the banning message, `no-store` |
+| `block` | ✅ | ✅ | `getStatusCode()`, the banning message, uncacheable |
 | `challenge` | — | — | 200 and the interstitial |
 | `record` | — | ✅ | nothing; the **next** request from that client is refused |
-| `redirect` | terminal | — | 302–307 to the rule's destination, `no-store` |
+| `redirect` | terminal | — | 302–307 to the rule's destination, uncacheable |
 | `mark` | — | — | nothing; the request carries a mark for your code |
 | `tarpit` | — | — | nothing, a few seconds late; the request then continues |
 
@@ -411,11 +411,28 @@ library's own, byte for byte, including the signed `provider_token`.
 
 | The library throws | The bundle returns |
 |---|---|
-| `ChallengeRequiredException` | 200, `$e->renderInterstitial($request)`, `Cache-Control: no-store` |
+| `ChallengeRequiredException` | 200, `$e->renderInterstitial($request)` |
 | `ChallengeSolvedException` | 303 to `getRedirect()`, with the pass cookie |
-| `FirewallRedirectException` | 302–307 to `getLocation()`, `Cache-Control: no-store` |
+| `FirewallRedirectException` | 302–307 to `getLocation()` |
 | `FirewallBlockedException` | `getStatusCode()`, the banning message |
 | `FirewallLockdownException` | the same, plus `Retry-After` |
+
+Every one of them is sent uncacheable, with the library's own `NoStore::HEADERS`:
+
+```
+Cache-Control: private, no-store, no-cache, must-revalidate, max-age=0
+Pragma: no-cache
+Expires: 0
+Surrogate-Control: no-store
+CDN-Cache-Control: no-store
+```
+
+All five, because `no-store` alone isn't enough: Pantheon's Fastly-based Global CDN caches
+a response that carries only that. For the challenge page that was a loop. Every visitor
+to a challenged URL got the same single-use ALTCHA challenge, the first to solve it got
+through, and everyone after was refused and sent back to the same cached page. With
+`blocked_response: http_exception`, the headers travel with the `HttpException`, so your
+error page carries them too.
 
 303 rather than 302, because the visitor got here by POSTing a solution and a client that
 repeats the POST re-submits one a single-use provider has already burned. The pass cookie
@@ -727,7 +744,7 @@ degrade to a sensible default when nothing was recorded.
 
 ## Requirements
 
-PHP 8.1–8.5 and `kanopi/firewall ^2.33`. 2.26 is what brings the response actions above and the challenge fix below; 2.30 adds the tarpit, whose decisions the profiler panel reports; 2.33 is where a block list can say its answers are incomplete, which the native block commands pass on, and where the firewall's own YAML can name trusted proxies, which `kanopi:firewall:doctor` recognises:
+PHP 8.1–8.5 and `kanopi/firewall ^2.36`. 2.26 is what brings the response actions above and the challenge fix below; 2.30 adds the tarpit, whose decisions the profiler panel reports; 2.33 is where a block list can say its answers are incomplete, which the native block commands pass on, and where the firewall's own YAML can name trusted proxies, which `kanopi:firewall:doctor` recognises; and 2.34.1 publishes the cache headers every response above is sent with, while 2.35 makes sure every install has the off-site redirect fix and the normalised paths:
 
 | Symfony | Supported | Tested in CI | Notes |
 |---|---|---|---|
